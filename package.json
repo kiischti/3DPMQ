@@ -1,0 +1,33 @@
+{
+  "name": "makerqueue",
+  "version": "0.1.0",
+  "description": "Self-hosted print request validation, approval and queue for makerspaces with PrusaLink printers",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node --disable-warning=ExperimentalWarning dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "mock": "tsx mock/mock-prusalink.ts",
+    "test": "tsx test/run.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.3.0",
+    "multer": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  }
+}

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MakerQueue – 3D print requests</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">MakerQueue <span>3D print requests</span></div>
+    <nav id="nav">
+      <a href="#/submit" data-r="submit">Submit a print</a>
+      <a href="#/queue" data-r="queue">Queue</a>
+      <a href="#/printers" data-r="printers">Printers</a>
+      <a href="#/staff" data-r="staff">Staff</a>
+    </nav>
+    <div id="conn" class="conn" title="Live connection"></div>
+  </header>
+  <main id="root"></main>
+  <div id="toast" class="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

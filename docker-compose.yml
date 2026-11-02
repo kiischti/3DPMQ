@@ -1,0 +1,14 @@
+services:
+  makerqueue:
+    build: .
+    restart: unless-stopped
+    ports: ["3000:3000"]
+    environment:
+      STAFF_PASSWORD: ${STAFF_PASSWORD:?set STAFF_PASSWORD in .env}
+      # SESSION_SECRET: optional; generated and stored in the database if unset
+      # POLL_MS: 5000
+      # RETENTION_DAYS: 30
+    volumes:
+      - makerqueue-data:/data
+volumes:
+  makerqueue-data:
