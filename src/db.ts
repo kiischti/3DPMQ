@@ -36,6 +36,18 @@ CREATE TABLE IF NOT EXISTS printers (
   loaded_filament_id INTEGER REFERENCES filaments(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL DEFAULT '',   -- stored lower-case; '' only for legacy users created before e-mail was required
+  class TEXT NOT NULL DEFAULT '',   -- the student's class (free text, e.g. 2CE)
+  role TEXT NOT NULL DEFAULT 'student', -- student | staff | other
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email != '';
+
 CREATE TABLE IF NOT EXISTS requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
@@ -89,7 +101,7 @@ export interface Rules {
   allowMulticolor: boolean;    // more than one filament used
   maxActivePerUser: number;    // pending + approved + printing, 0 = unlimited
   monthlyGramQuota: number;    // grams per user (by name) per calendar month, 0 = unlimited
-  requireEmail: boolean;
+  requireClass: boolean;       // new students must give their class
 }
 
 export const DEFAULT_RULES: Rules = {
@@ -103,7 +115,7 @@ export const DEFAULT_RULES: Rules = {
   allowMulticolor: false,
   maxActivePerUser: 3,
   monthlyGramQuota: 0,
-  requireEmail: false,
+  requireClass: true,
 };
 
 export function getRules(): Rules {
@@ -131,6 +143,48 @@ export function audit(actor: string, action: string, requestId?: number, detail 
   db.prepare('INSERT INTO audit(actor, action, request_id, detail) VALUES (?,?,?,?)')
     .run(actor, action, requestId ?? null, detail);
 }
+
+
+// ---------- migrations (safe to run on every start)
+const columns = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+const addColumn = (t: string, c: string, def: string) => { if (!columns(t).includes(c)) db.exec(`ALTER TABLE ${t} ADD COLUMN ${c} ${def}`); };
+addColumn('requests', 'user_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
+addColumn('requests', 'user_class', "TEXT NOT NULL DEFAULT ''");
+addColumn('requests', 'material', "TEXT NOT NULL DEFAULT ''");          // e.g. PLA, or PLA/PETG for multi-material
+addColumn('requests', 'printed_grams', 'REAL NOT NULL DEFAULT 0');       // grams actually printed (estimate x progress)
+addColumn('requests', 'printed_seconds', 'INTEGER NOT NULL DEFAULT 0');  // time actually spent printing
+addColumn('requests', 'last_time_printing', 'INTEGER NOT NULL DEFAULT 0'); // last "time printing" reported by the printer
+db.exec('CREATE INDEX IF NOT EXISTS idx_requests_user ON requests(user_id)');
+
+if (!db.prepare('SELECT 1 FROM settings WHERE key = ?').get('migrated_users_v1')) {
+  db.exec('BEGIN');
+  try {
+    const rows = db.prepare('SELECT id, user_name, user_email, meta_json, grams, seconds, status, started_at, finished_at, last_progress FROM requests ORDER BY id').all() as any[];
+    const byEmail = new Map<string, number>(), byName = new Map<string, number>();
+    const insUser = db.prepare('INSERT INTO users(name, email) VALUES (?, ?)');
+    const upd = db.prepare('UPDATE requests SET user_id = ?, material = ?, printed_grams = ?, printed_seconds = ? WHERE id = ?');
+    for (const r of rows) {
+      const email = String(r.user_email ?? '').trim().toLowerCase(), name = String(r.user_name ?? '').trim();
+      let uid: number | undefined = email ? byEmail.get(email) : byName.get(name.toLowerCase());
+      if (uid === undefined) {
+        uid = Number(insUser.run(name || 'Unknown', email).lastInsertRowid);
+        if (email) byEmail.set(email, uid); else byName.set(name.toLowerCase(), uid);
+      }
+      let material = '';
+      try { material = (JSON.parse(r.meta_json).filamentTypes ?? []).map((t: string) => String(t).toUpperCase()).join('/'); } catch { /* ignore */ }
+      const wall = r.started_at && r.finished_at ? Math.max(0, Math.round((Date.parse(r.finished_at) - Date.parse(r.started_at)) / 1000)) : 0;
+      const frac = r.status === 'done' ? 1 : r.started_at ? Math.max(0, Math.min(1, (r.last_progress ?? 0) / 100)) : 0;
+      upd.run(uid, material, Math.round((r.grams ?? 0) * frac * 100) / 100, r.started_at ? wall : 0, r.id);
+    }
+    db.prepare('INSERT INTO settings(key,value) VALUES (?,?)').run('migrated_users_v1', new Date().toISOString());
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+// ---------- people helpers
+export const normEmail = (s: unknown) => String(s ?? '').trim().toLowerCase();
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+export const ROLES = ['student', 'staff', 'other'] as const;
 
 // seed a few filaments on first run so the form is usable immediately
 if ((db.prepare('SELECT COUNT(*) AS n FROM filaments').get() as { n: number }).n === 0) {

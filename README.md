@@ -14,7 +14,7 @@ PrusaSlicer ──export G-code──▶ 3DPMQ (validate · name · filament · 
 
 **For users** (no account needed)
 - Drop a `.gcode` / `.bgcode` file; instant feedback: printer profile, material, colour, time, grams, and a list of problems *before* sending.
-- Enter name (+ optional e-mail), pick a filament from the makerspace's list (pre-selected from the G-code colour), add a note.
+- Enter name, **e-mail** and **class**, pick a filament from the makerspace's list (pre-selected from the G-code colour), add a note.
 - Public queue with live status, queue position and progress; cancel your own request while it is pending/approved.
 
 **Automatic validation** (all limits editable by staff on the *Rules* tab)
@@ -23,12 +23,14 @@ PrusaSlicer ──export G-code──▶ 3DPMQ (validate · name · filament · 
 - Material allowed (default PLA, PETG), chosen filament matches the sliced material, filament in stock
 - Max print time, max grams, max nozzle / bed temperature actually used in the file
 - Dangerous commands rejected (`M997` firmware update, `M500–M503` settings, `M301/M303` PID, `M92`, `M112`, …); `M600/M0/M1` pauses warn
-- Multi-material off by default; max open requests per person; optional monthly gram quota per person
+- Multi-material off by default; max open requests per person; optional monthly gram quota per person (people are identified by their e-mail address)
 
 **For staff** (shared password)
 - Review queue with all details and the G-code download; approve / reject with reason; priority up/down
 - Printers: add by IP, test connection, set which filament is loaded, "bed is clear" button, pause / resume / stop
 - *Start* uploads the file over PrusaLink and starts printing; or enable **auto-start** per printer (starts the next eligible job only after someone pressed "bed is clear")
+- **Refused and cancelled** requests are listed on the Review tab; remove them one by one or with *Clear all* (their files are deleted, finished prints are never touched)
+- **People** tab: every person who ever submitted (students, staff, others) with e-mail, class, role and notes; search and filter by role / class; add, correct and remove people; statistics per person (see below); CSV export
 - Filament catalogue, rules, audit log, CSV export
 - Live dashboard (Server-Sent Events): state, temperatures, progress, time left, who is printing what
 
@@ -78,6 +80,20 @@ Try it without printers: `npm run mock` starts two fake PrusaLink printers on `:
 3. Give users a PrusaSlicer tip: export with **Ctrl+G** and choose the right printer profile.
 
 Environment variables: `STAFF_PASSWORD` (required), `PORT`, `DATA_DIR`, `POLL_MS`, `MAX_UPLOAD_MB`, `RETENTION_DAYS` (G-code files of finished jobs are deleted after this), `SESSION_SECRET`.
+
+## People and statistics
+Every request is linked to a person. A person is created automatically from the first request (name, e-mail, class) and recognised by e-mail address afterwards (case-insensitive).
+The public form never overwrites an existing person: if someone types a different name or class for a known e-mail, staff see a note on the request and can correct the record on the People tab.
+Staff and other users are people too, with the same fields, statistics and edit/remove options; set the *role* to Staff or Other (the class is then not required).
+Corrections to a person also update the name, e-mail and class shown on their requests.
+
+**Statistics** (per person, per material, per month; overall and per class on the People tab and in the CSV): the number of completed prints, the weight of plastic and the print time.
+A finished print counts in full; a print that was stopped or failed part-way counts by the share that was printed (last progress reported by the printer). Weights are the slicer's estimate; print time is the time the printer reported (or the elapsed time if it reported none).
+
+**Removing a person** is only possible when they have no open requests. *Remove person* erases name, e-mail, class and notes everywhere (requests, audit log, uploaded files) and keeps the prints as anonymous statistics; *Remove incl. all requests* also deletes their requests and the statistics.
+Only staff can see e-mail addresses and classes; the public queue shows names only.
+
+**Upgrading from an older version:** the database is migrated automatically on start. Existing requests are grouped into people by e-mail (or by name when there was none). People without an e-mail or class are marked with a warning on the People tab so staff can complete them.
 
 ## Releases and versions
 The version lives in one place, `package.json`, and is shown in the page footer, the server log and `/api/config`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).

@@ -4,6 +4,20 @@ All notable changes are listed here. The version number lives in `package.json`;
 Format based on [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/) (0.x: the API may still change).
 
 ## [Unreleased]
+### Added
+- People: every request is linked to a person (e-mail, class, role, notes). New *People* tab to list, search, filter, add, correct and remove students and staff, with CSV export.
+- Statistics per person, per material and per month (completed prints, plastic weight, print time; stopped prints count by progress), plus overall and per-class totals.
+- Class field on the request form; rule "new students must enter their class".
+- Refused and cancelled requests can be removed one by one or all at once (*Clear all*) on the Review tab.
+- Removing a person erases their personal data (optionally with all requests) and keeps anonymous statistics.
+### Fixed
+- Pause, resume, stop and cancel now ask the printer for the job that is running right now. Before, right after a print started the server could still hold the previous job's status: the progress could briefly show 100 %, and "stop" could be sent for the old job and fail with a generic error.
+- If the printer refuses to stop a print, cancelling the request now reports that clearly instead of marking the request cancelled while the printer keeps printing.
+- Forms on the staff pages (printer, rules, person, filament) and the login form are no longer wiped by a live update while you are typing.
+### Changed
+- The e-mail address is now required on the request form (it identifies the person); the old "require e-mail" rule is gone.
+- Open-request limit and monthly gram quota are counted per person (by e-mail) instead of by typed name.
+- The database is migrated automatically; existing requests are grouped into people.
 
 ## [0.11.1] - 2026-11-02
 ### Added

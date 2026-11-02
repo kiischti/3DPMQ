@@ -92,7 +92,8 @@ try {
   ok(codes(await v('good.gcode', petg.id)).includes('filament-mismatch'), 'selected filament must match sliced material');
 
   console.log('\nSubmission, review, printing');
-  const sub = async (file: string, name: string, fid: number) => api('POST', '/api/requests', undefined, form(file, { name, email: '', filamentId: String(fid), notes: 'test' }));
+  const emailOf = (name: string) => `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.org`;
+  const sub = async (file: string, name: string, fid: number, cls = '2CE') => api('POST', '/api/requests', undefined, form(file, { name, email: emailOf(name), class: cls, filamentId: String(fid), notes: 'test' }));
   const bad = await sub('too-heavy.gcode', 'Alice', pla.id);
   ok(bad.status === 422 && codes(bad.data).includes('too-heavy'), 'invalid submission refused with reasons (422)');
   ok((await sub('good.gcode', 'A', pla.id)).status === 422, 'name too short refused');
@@ -153,11 +154,108 @@ try {
   const f2 = await sub('good.gcode', 'Frank', pla.id);
   ok(f1.status === 201 && f2.status === 422 && codes(f2.data).includes('quota'), 'monthly gram quota enforced');
 
+  console.log('\nPeople, classes, statistics, clearing');
+  await api('PUT', '/api/staff/rules', { monthlyGramQuota: 0, maxActivePerUser: 10 });
+  const subx = (file: string, fields: Record<string, string>) => api('POST', '/api/requests', undefined, form(file, { filamentId: String(pla.id), ...fields }));
+  cookie = '';
+  ok(codes((await subx('good.gcode', { name: 'Hanna', email: '', class: '2CE' })).data).includes('email'), 'e-mail is required');
+  ok(codes((await subx('good.gcode', { name: 'Hanna', email: 'not-an-email', class: '2CE' })).data).includes('email'), 'invalid e-mail refused');
+  ok(codes((await subx('good.gcode', { name: 'Hanna', email: 'hanna@example.org', class: '' })).data).includes('class'), 'class is required for a new student');
+  const h1 = await subx('good.gcode', { name: 'Hanna', email: 'Hanna@Example.org', class: '2CE' });
+  ok(h1.status === 201, 'new person created with e-mail and class (e-mail case-insensitive)');
+  const h2 = await subx('good.gcode', { name: 'Hannah (typo)', email: 'hanna@example.org', class: '' });
+  ok(h2.status === 201, 'known e-mail: class need not be typed again');
+  ok(!JSON.stringify(h2.data).includes('Hanna'), 'response to the submitter does not reveal the registered name');
+  const pub2 = (await api('GET', '/api/state')).data;
+  ok(pub2.requests.every((x: any) => !('user_email' in x) && !('user_class' in x)), 'public state hides e-mail and class');
+  ok((await api('GET', '/api/staff/users')).status === 401, 'people list needs staff login');
+  ok((await api('GET', '/api/config')).data.classes.includes('2CE'), 'known classes offered to the form');
+  cookie = staffCookie;
+
+  let users = (await api('GET', '/api/staff/users')).data as any[];
+  const hanna = users.filter((u) => u.email === 'hanna@example.org');
+  ok(hanna.length === 1 && hanna[0].name === 'Hanna' && hanna[0].class === '2CE' && hanna[0].requests_total === 2, 'both requests linked to one person; typed name did not overwrite the record');
+  const hreq = (await api('GET', '/api/state')).data.requests.find((x: any) => x.id === h2.data.id);
+  ok(hreq.user_name === 'Hanna' && hreq.issues.some((i: any) => i.code === 'name-differs'), 'staff see a note that the typed name differs');
+  ok((await api('POST', `/api/staff/requests/${h1.data.id}/reject`, { reason: 'test' })).status === 200 && (await api('POST', `/api/staff/requests/${h2.data.id}/reject`, { reason: 'test' })).status === 200, 'Hanna requests rejected (to be cleared later)');
+
+  // statistics of finished prints
+  const alice = users.find((u) => u.email === emailOf('Alice'));
+  ok(alice && alice.prints === 1 && Math.abs(alice.grams - 12.34) < 0.01 && alice.seconds >= 1 && alice.by_material[0].material === 'PLA', `statistics: Alice printed ${alice?.grams} g PLA in ${alice?.seconds}s`);
+  const detail = (await api('GET', `/api/staff/users/${alice.id}`)).data;
+  ok(detail.by_month.length === 1 && /^\d{4}-\d{2}$/.test(detail.by_month[0].month) && detail.totals.prints === 1 && detail.requests.length === 1, 'statistics per month and request list');
+
+  // a print that is stopped half way counts partially
+  const g = await sub('good.gcode', 'Gina', pla.id);
+  await api('POST', `/api/staff/requests/${g.data.id}/approve`);
+  await sleep(700);
+  ok((await api('POST', `/api/staff/requests/${g.data.id}/start`, { printerId: p1 })).status === 202, 'Gina print started');
+  ok(await waitFor(async () => ((await api('GET', '/api/state')).data.requests.find((x: any) => x.id === g.data.id).progress ?? 0) >= 20, 15000), 'Gina print is at 20%+');
+  const stopRes = await api('POST', `/api/staff/printers/${p1}/stop`);
+  ok(stopRes.status === 200, `stop request accepted (HTTP ${stopRes.status} ${JSON.stringify(stopRes.data)})`);
+  ok(await waitFor(async () => (await api('GET', '/api/state')).data.requests.find((x: any) => x.id === g.data.id).status === 'failed', 15000), 'stopped print is marked failed');
+  ok((await api('POST', `/api/staff/printers/${p1}/stop`)).status === 409, 'stop with nothing running is a clear 409, not a server error');
+  users = (await api('GET', '/api/staff/users')).data;
+  const gina = users.find((u) => u.email === emailOf('Gina'));
+  ok(gina.prints === 0 && gina.by_material[0].partial === 1 && gina.grams > 0 && gina.grams < 12.34, `partial print counted by progress (${gina.grams} g of 12.34 g)`);
+
+  // overview, filters, CSV
+  const st = (await api('GET', '/api/staff/stats')).data;
+  ok(st.prints >= 2 && st.by_material.find((m: any) => m.material === 'PLA').grams >= 24.6 && st.by_class.some((c: any) => c.class === '2CE'), `overview: ${st.prints} prints, ${st.grams} g, per material and per class`);
+  ok((await api('GET', '/api/staff/users?class=2ce')).data.length === users.length, 'class filter is case-insensitive');
+  ok((await api('GET', '/api/staff/users?role=staff')).data.length === 0 && (await api('GET', '/api/staff/users?q=alice')).data.length === 1, 'role filter and search');
+  const pcsv = await (await fetch(BASE + '/api/staff/users/export.csv', { headers: { Cookie: staffCookie } })).text();
+  ok(pcsv.includes('grams_PLA') && pcsv.includes(emailOf('Alice')), 'people CSV export with per-material columns');
+
+  // staff add and correct people; staff members have the same data
+  const sam = await api('POST', '/api/staff/users', { name: 'Sam Staff', email: 'sam@example.org', class: '', role: 'staff', notes: 'lab manager' });
+  ok(sam.status === 201, 'staff can add a person');
+  ok((await api('POST', '/api/staff/users', { name: 'Sam Two', email: 'SAM@example.org', role: 'student' })).status === 409, 'duplicate e-mail refused');
+  ok((await api('POST', '/api/staff/users', { name: 'X', email: 'x@example.org', role: 'student' })).status === 400 && (await api('POST', '/api/staff/users', { name: 'Xavier', email: 'x@example.org', role: 'boss' })).status === 400, 'invalid name / role refused');
+  cookie = '';
+  ok((await subx('good.gcode', { name: 'Sam Staff', email: 'sam@example.org', class: '' })).status === 201, 'class is not required for a staff member');
+  cookie = staffCookie;
+  const upd = await api('PUT', `/api/staff/users/${alice.id}`, { name: 'Alice Example', email: 'alice.new@example.org', class: '3GE', role: 'student', notes: 'corrected' });
+  ok(upd.status === 200, 'staff can correct a person');
+  const areq = (await api('GET', '/api/state')).data.requests.find((x: any) => x.id === a.data.id);
+  ok(areq.user_name === 'Alice Example' && areq.user_class === '3GE' && areq.user_email === 'alice.new@example.org', 'correction also shows on the person\'s requests');
+  ok((await api('PUT', `/api/staff/users/${alice.id}`, { name: 'Alice Example', email: emailOf('Bob'), class: '3GE', role: 'student' })).status === 409, 'cannot change e-mail to one that is taken');
+  ok((await api('GET', `/api/staff/users/${alice.id}`)).data.totals.grams > 12, 'statistics stay with the person after the correction');
+
+  // removing people
+  const erin = users.find((u) => u.email === emailOf('Erin')), frank = users.find((u) => u.email === emailOf('Frank'));
+  ok((await api('DELETE', `/api/staff/users/${erin.id}`)).status === 409, 'cannot remove a person with open requests');
+  for (const r of (await api('GET', '/api/state')).data.requests.filter((x: any) => ['pending', 'approved'].includes(x.status))) await api('POST', `/api/staff/requests/${r.id}/reject`, { reason: 'cleanup' });
+  const erinReqId = (await api('GET', '/api/state')).data.requests.find((x: any) => x.user_email === emailOf('Erin')).id;
+  ok((await api('DELETE', `/api/staff/users/${erin.id}`)).status === 200, 'person removed (personal data erased)');
+  const erinReq = (await api('GET', '/api/state')).data.requests.find((x: any) => x.id === erinReqId);
+  ok(erinReq.user_name === 'Deleted user' && erinReq.user_email === '' && erinReq.user_id === null && erinReq.file_name === '(removed)', 'their requests are anonymised');
+  const ginaId = gina.id;
+  ok((await api('DELETE', `/api/staff/users/${ginaId}?mode=anonymize`)).status === 200, 'person with finished print removed');
+  ok((await api('GET', '/api/staff/stats')).data.by_material.find((m: any) => m.material === 'PLA').grams >= st.by_material.find((m: any) => m.material === 'PLA').grams, 'anonymous statistics are kept');
+  ok((await api('DELETE', `/api/staff/users/${frank.id}?mode=purge`)).status === 200 && !(await api('GET', '/api/state')).data.requests.some((x: any) => x.user_email === emailOf('Frank')), 'purge also deletes their requests');
+  ok(!(await api('GET', '/api/staff/audit')).data.some((x: any) => JSON.stringify(x).includes(emailOf('Erin'))), 'audit log no longer contains the removed person\'s e-mail');
+
+  // clearing refused requests
+  const before = (await api('GET', '/api/state')).data.requests;
+  const refused = before.filter((x: any) => x.status === 'rejected' || (x.status === 'cancelled' && !x.started_at)).length;
+  ok(refused >= 4, `there are ${refused} refused/cancelled requests to clear`);
+  const doneReq = before.find((x: any) => x.status === 'done');
+  ok((await api('DELETE', `/api/staff/requests/${doneReq.id}`)).status === 409, 'a finished print cannot be deleted');
+  const one = before.find((x: any) => x.status === 'rejected');
+  ok((await api('DELETE', `/api/staff/requests/${one.id}`)).status === 200, 'a single refused request can be removed');
+  cookie = ''; ok((await api('POST', '/api/staff/requests/clear-refused')).status === 401, 'clearing needs staff login'); cookie = staffCookie;
+  const cl = await api('POST', '/api/staff/requests/clear-refused');
+  ok(cl.status === 200 && cl.data.removed === refused - 1, `all other refused requests cleared (${cl.data.removed})`);
+  const after = (await api('GET', '/api/state')).data.requests;
+  ok(!after.some((x: any) => x.status === 'rejected' || (x.status === 'cancelled' && !x.started_at)) && after.some((x: any) => x.status === 'done'), 'queue no longer lists refused requests; finished prints stay');
+
   const csv = await fetch(BASE + '/api/staff/export.csv', { headers: { Cookie: staffCookie } });
-  ok(csv.ok && (await csv.text()).split('\n').length > 5, 'CSV export');
+  ok(csv.ok && (await csv.text()).split('\n').length >= 3, 'request CSV export');
   ok((await api('GET', '/api/staff/audit')).data.length > 10, 'audit log written');
   const leftovers = fs.readdirSync(path.join(dataDir, 'uploads')).length;
-  ok(leftovers === 6, `rejected/validated uploads are not left on disk (${leftovers} files = accepted requests only)`);
+  const rowsLeft = (await api('GET', '/api/state')).data.requests.filter((x: any) => x.file_name !== '(removed)').length;
+  ok(leftovers === rowsLeft, `no stray uploads: ${leftovers} files for ${rowsLeft} remaining requests with a file (cleared, rejected and anonymised ones were deleted)`);
 } catch (e) {
   fail++; console.error('TEST CRASHED', e);
 } finally {

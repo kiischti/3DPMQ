@@ -4,13 +4,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DATA_DIR, UPLOAD_DIR, audit, db, getRules, getSecret, setRules, type Rules } from './db.js';
+import { DATA_DIR, EMAIL_RE, ROLES, UPLOAD_DIR, audit, db, getRules, getSecret, normEmail, setRules, type Rules } from './db.js';
 import {
   detectFormat, hasErrors, modelEquals, parseMeta, scanFile, validate,
   type FilamentLite, type GcodeMeta, type Issue, type PrinterLite, type ScanResult,
 } from './gcode.js';
 import { PrusaLink, type JobInfo, type PrinterStatus } from './prusalink.js';
 import { SOURCE_URL, VERSION } from './version.js';
+import { peopleRoutes } from './people.js';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const POLL_MS = parseInt(process.env.POLL_MS ?? '5000', 10);
@@ -107,6 +108,15 @@ function queueOrder(): Row[] {
   return all(`SELECT * FROM requests WHERE status = 'approved' ORDER BY priority DESC, approved_at ASC, id ASC`);
 }
 
+const printerIsActive = (rt?: Runtime) => !!(rt?.online && rt.status?.printer?.state && ACTIVE_STATES.has(rt.status.printer.state));
+
+/** Asks the printer itself (not the cached status, which can be a few seconds old or describe the previous job) for the running job. */
+async function activeJobId(p: Row): Promise<number | undefined> {
+  const st = await linkFor(p).status();
+  const state = st.printer?.state;
+  return state && ACTIVE_STATES.has(state) ? st.job?.id : undefined;
+}
+
 function requestView(r: Row, staff: boolean, queuePos?: number) {
   const f = filamentRow(r.filament_id);
   const pr = r.printer_id ? get<Row>('SELECT name FROM printers WHERE id = ?', r.printer_id) : undefined;
@@ -116,14 +126,15 @@ function requestView(r: Row, staff: boolean, queuePos?: number) {
     filament: f ? { id: f.id, material: f.material, colour_name: f.colour_name, colour_hex: f.colour_hex } : null,
     file_name: r.file_name, grams: r.grams, seconds: r.seconds, status: r.status,
     reject_reason: r.reject_reason, priority: r.priority, printer_id: r.printer_id, printer_name: pr?.name ?? null,
-    started_at: r.started_at, finished_at: r.finished_at, queue_position: queuePos ?? null,
-    progress: r.status === 'printing' ? (rt?.status?.job?.progress ?? r.last_progress) : r.status === 'done' ? 100 : null,
+    started_at: r.started_at, finished_at: r.finished_at, queue_position: queuePos ?? null, material: r.material,
+    progress: r.status === 'printing' ? (printerIsActive(rt) ? (rt?.status?.job?.progress ?? r.last_progress) : r.last_progress) : r.status === 'done' ? 100 : null,
     error: r.error,
   };
   if (staff) {
     const eligible = r.status === 'approved' ? eligiblePrinters(r) : [];
     Object.assign(base, {
-      user_email: r.user_email, notes: r.notes, meta: JSON.parse(r.meta_json), issues: JSON.parse(r.issues_json),
+      user_email: r.user_email, user_id: r.user_id, user_class: r.user_class, printed_grams: r.printed_grams, printed_seconds: r.printed_seconds,
+      notes: r.notes, meta: JSON.parse(r.meta_json), issues: JSON.parse(r.issues_json),
       reviewed_by: r.reviewed_by, file_size: r.file_size,
       eligible: eligible.map((p) => ({ id: p.id, name: p.name, available: printerAvailable(p) })),
     });
@@ -181,7 +192,14 @@ function broadcast() {
 const fileExt = (name: string) => (detectFormat(name) === 'bgcode' ? '.bgcode' : '.gcode');
 
 function finishRequest(r: Row, status: 'done' | 'failed' | 'cancelled', error = '') {
-  run('UPDATE requests SET status = ?, finished_at = ?, error = ? WHERE id = ?', status, nowIso(), error, r.id);
+  // What counts for the statistics: a finished print counts fully; a stopped/failed one counts by its last reported progress.
+  const started = !!r.started_at;
+  const frac = status === 'done' ? 1 : started ? Math.max(0, Math.min(1, (r.last_progress ?? 0) / 100)) : 0;
+  const grams = Math.round((r.grams ?? 0) * frac * 100) / 100;
+  const wall = started ? Math.max(0, Math.round((Date.now() - Date.parse(r.started_at)) / 1000)) : 0;
+  const secs = started ? (r.last_time_printing > 0 ? r.last_time_printing : wall) : 0; // printer-reported time when available
+  run('UPDATE requests SET status = ?, finished_at = ?, error = ?, printed_grams = ?, printed_seconds = ? WHERE id = ?',
+    status, nowIso(), error, grams, secs, r.id);
   if (r.printer_id) run('UPDATE printers SET bed_clear = 0 WHERE id = ?', r.printer_id);
   audit('system', `job-${status}`, r.id, error);
 }
@@ -238,7 +256,8 @@ function reconcile() {
     if (!rt?.online || !state) continue;
     if (ACTIVE_STATES.has(state)) {
       const prog = rt.status?.job?.progress ?? r.last_progress;
-      run('UPDATE requests SET seen_printing = 1, last_progress = ? WHERE id = ?', prog, r.id);
+      const tp = Math.round(rt.status?.job?.time_printing ?? r.last_time_printing ?? 0);
+      run('UPDATE requests SET seen_printing = 1, last_progress = ?, last_time_printing = ? WHERE id = ?', prog, tp, r.id);
       continue;
     }
     const sinceStart = Date.now() - new Date(r.started_at).getTime();
@@ -321,6 +340,7 @@ app.get('/api/config', (_req, res) => {
     version: VERSION, source_url: SOURCE_URL || null,
     rules: { ...rules },
     filaments: all('SELECT * FROM filaments WHERE in_stock = 1 ORDER BY material, colour_name'),
+    classes: all<{ class: string }>("SELECT DISTINCT class FROM users WHERE class != '' ORDER BY class COLLATE NOCASE").map((r) => r.class),
     printer_models: [...new Set(allPrinters().filter((p) => p.enabled).map((p) => p.model).filter(Boolean))],
   });
 });
@@ -352,28 +372,31 @@ app.post('/api/requests', upload.single('file'), wrap(async (req, res) => {
   let keep = false;
   try {
     const rules = getRules();
-    const name = String(req.body.name ?? '').trim().slice(0, 80);
-    const email = String(req.body.email ?? '').trim().slice(0, 120);
+    const typedName = String(req.body.name ?? '').trim().slice(0, 80);
+    const email = normEmail(req.body.email).slice(0, 120);
+    const typedClass = String(req.body.class ?? '').trim().slice(0, 40);
     const notes = String(req.body.notes ?? '').trim().slice(0, 1000);
     const fid = parseInt(req.body.filamentId, 10);
+    const existing = EMAIL_RE.test(email) ? get<Row>('SELECT * FROM users WHERE email = ?', email) : undefined;
     const issues0: Issue[] = [];
-    if (name.length < 2) issues0.push({ level: 'error', code: 'name', message: 'Please enter your name.' });
-    if (rules.requireEmail && !/^\S+@\S+\.\S+$/.test(email)) issues0.push({ level: 'error', code: 'email', message: 'Please enter a valid e-mail address.' });
-    if (email && !/^\S+@\S+\.\S+$/.test(email)) issues0.push({ level: 'error', code: 'email', message: 'E-mail address looks invalid.' });
+    if (typedName.length < 2) issues0.push({ level: 'error', code: 'name', message: 'Please enter your name.' });
+    if (!EMAIL_RE.test(email)) issues0.push({ level: 'error', code: 'email', message: 'Please enter a valid e-mail address.' });
+    const needsClass = !existing || existing.role === 'student';
+    if (rules.requireClass && needsClass && !typedClass && !existing?.class) issues0.push({ level: 'error', code: 'class', message: 'Please enter your class.' });
     if (!Number.isFinite(fid) || !filamentRow(fid)) issues0.push({ level: 'error', code: 'filament', message: 'Please choose a filament.' });
 
     const { meta, issues: issues1 } = await analyse(f, Number.isFinite(fid) ? fid : undefined, rules);
     const issues = [...issues0, ...issues1];
 
-    // per-user limits
-    if (name) {
-      const active = get<{ n: number }>(`SELECT COUNT(*) AS n FROM requests WHERE lower(user_name) = lower(?) AND status IN ('pending','approved','uploading','printing')`, name)!.n;
+    // per-person limits (people are identified by e-mail)
+    if (existing) {
+      const active = get<{ n: number }>(`SELECT COUNT(*) AS n FROM requests WHERE user_id = ? AND status IN ('pending','approved','uploading','printing')`, existing.id)!.n;
       if (rules.maxActivePerUser > 0 && active >= rules.maxActivePerUser) {
         issues.push({ level: 'error', code: 'active-limit', message: `You already have ${active} open requests (limit ${rules.maxActivePerUser}). Wait until one finishes.` });
       }
       if (rules.monthlyGramQuota > 0 && meta?.grams !== undefined) {
         const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)).toISOString();
-        const used = get<{ g: number | null }>(`SELECT SUM(grams) AS g FROM requests WHERE lower(user_name) = lower(?) AND created_at >= ? AND status NOT IN ('rejected','cancelled')`, name, monthStart)!.g ?? 0;
+        const used = get<{ g: number | null }>(`SELECT SUM(grams) AS g FROM requests WHERE user_id = ? AND created_at >= ? AND status NOT IN ('rejected','cancelled')`, existing.id, monthStart)!.g ?? 0;
         if (used + meta.grams > rules.monthlyGramQuota) {
           issues.push({ level: 'error', code: 'quota', message: `Monthly quota exceeded: ${used.toFixed(0)} g used + ${meta.grams.toFixed(0)} g requested > ${rules.monthlyGramQuota} g.` });
         }
@@ -381,21 +404,34 @@ app.post('/api/requests', upload.single('file'), wrap(async (req, res) => {
     }
     if (hasErrors(issues) || !meta) return void res.status(422).json({ error: 'Validation failed', issues, meta });
 
+    // find or create the person; an existing record is never overwritten from the public form (staff correct it)
+    const staffInfo: Issue[] = [];
+    let userId: number, userName: string, userClass: string;
+    if (existing) {
+      userId = existing.id; userName = existing.name; userClass = existing.class;
+      if (typedName.toLowerCase() !== existing.name.toLowerCase()) staffInfo.push({ level: 'info', code: 'name-differs', message: `Typed name "${typedName}" differs from the registered name "${existing.name}" for this e-mail.` });
+      if (typedClass && typedClass.toLowerCase() !== existing.class.toLowerCase()) staffInfo.push({ level: 'info', code: 'class-differs', message: `Typed class "${typedClass}" differs from the registered class "${existing.class || '(none)'}".` });
+    } else {
+      userId = Number(run('INSERT INTO users(name, email, class) VALUES (?,?,?)', typedName, email, typedClass).lastInsertRowid);
+      userName = typedName; userClass = typedClass;
+      audit(typedName, 'user-created', undefined, email);
+    }
+    const material = (meta.filamentTypes.length ? meta.filamentTypes : [filamentRow(fid)?.material ?? '']).map((t) => t.toUpperCase()).join('/');
     const token = crypto.randomBytes(16).toString('hex');
     const ins = run(
-      `INSERT INTO requests(user_name,user_email,filament_id,notes,file_name,file_path,file_size,meta_json,issues_json,grams,seconds,cancel_token)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      name, email, fid, notes, path.basename(f.originalname).slice(0, 200), f.path, f.size,
-      JSON.stringify(meta), JSON.stringify(issues), meta.grams ?? null, meta.seconds ?? null, token);
+      `INSERT INTO requests(user_id,user_name,user_email,user_class,filament_id,material,notes,file_name,file_path,file_size,meta_json,issues_json,grams,seconds,cancel_token)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      userId, userName, email, userClass, fid, material, notes, path.basename(f.originalname).slice(0, 200), f.path, f.size,
+      JSON.stringify(meta), JSON.stringify([...issues, ...staffInfo]), meta.grams ?? null, meta.seconds ?? null, token);
     keep = true;
     const id = Number(ins.lastInsertRowid);
-    audit(name, 'submit', id, f.originalname);
+    audit(userName, 'submit', id, f.originalname);
     broadcast();
     res.status(201).json({ id, cancel_token: token, issues });
   } finally { if (!keep) discard(f); }
 }));
 
-app.post('/api/requests/:id/cancel', wrap((req, res) => {
+app.post('/api/requests/:id/cancel', wrap(async (req, res) => {
   const id = parseInt(String(req.params.id), 10);
   const r = get<Row>('SELECT * FROM requests WHERE id = ?', id);
   if (!r) throw httpError(404, 'Not found');
@@ -407,8 +443,13 @@ app.post('/api/requests/:id/cancel', wrap((req, res) => {
   }
   if (r.status === 'printing') {
     const p = get<Row>('SELECT * FROM printers WHERE id = ?', r.printer_id);
-    const jid = runtime.get(r.printer_id)?.status?.job?.id;
-    if (p && jid !== undefined) void linkFor(p).stop(jid).catch((e) => console.warn('stop failed', e.message));
+    if (p) {
+      let jid: number | undefined;
+      try { jid = await activeJobId(p); } catch (e: any) { throw httpError(502, `Printer not reachable, the print was NOT stopped: ${e.message}`); }
+      if (jid !== undefined) {
+        try { await linkFor(p).stop(jid); } catch (e: any) { throw httpError(502, `The printer did not stop the print: ${e.message}`); }
+      }
+    }
   }
   finishRequest(r, 'cancelled', staff ? `Cancelled by ${staff}` : 'Cancelled by submitter');
   broadcast();
@@ -547,10 +588,12 @@ staff.post('/printers/:id/:action', wrap(async (req, res) => {
   if (!['pause', 'resume', 'stop'].includes(String(req.params.action))) throw httpError(404, 'Unknown action');
   const p = get<Row>('SELECT * FROM printers WHERE id = ?', parseInt(String(req.params.id), 10));
   if (!p) throw httpError(404, 'Not found');
-  const jid = runtime.get(p.id)?.status?.job?.id;
+  let jid: number | undefined;
+  try { jid = await activeJobId(p); } catch (e: any) { throw httpError(502, `Printer not reachable: ${e.message}`); }
   if (jid === undefined) throw httpError(409, 'No running job on this printer');
-  const l = linkFor(p);
-  await (String(req.params.action) === 'pause' ? l.pause(jid) : String(req.params.action) === 'resume' ? l.resume(jid) : l.stop(jid));
+  const l = linkFor(p), action = String(req.params.action);
+  try { await (action === 'pause' ? l.pause(jid) : action === 'resume' ? l.resume(jid) : l.stop(jid)); }
+  catch (e: any) { throw httpError(502, `The printer refused to ${action}: ${e.message}`); }
   audit(actor(req), `printer-${String(req.params.action)}`, undefined, p.name);
   void tick(); res.json({ ok: true });
 }));
@@ -600,12 +643,13 @@ staff.put('/rules', wrap((req, res) => {
     maxFileMB: n(b.maxFileMB, cur.maxFileMB), maxActivePerUser: n(b.maxActivePerUser, cur.maxActivePerUser),
     monthlyGramQuota: n(b.monthlyGramQuota, cur.monthlyGramQuota),
     requirePrusaSlicer: b.requirePrusaSlicer ?? cur.requirePrusaSlicer, allowMulticolor: b.allowMulticolor ?? cur.allowMulticolor,
-    requireEmail: b.requireEmail ?? cur.requireEmail,
+    requireClass: b.requireClass ?? cur.requireClass,
   };
   audit(actor(req), 'rules', undefined, JSON.stringify(next));
   res.json(setRules(next));
 }));
 staff.get('/audit', (_req, res) => res.json(all('SELECT * FROM audit ORDER BY id DESC LIMIT 200')));
+peopleRoutes(staff, { wrap, actor, httpError, broadcast });
 app.use('/api/staff', staff);
 
 // ---- errors

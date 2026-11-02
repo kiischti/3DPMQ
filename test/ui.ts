@@ -16,7 +16,7 @@ let fail = 0;
 const ok = (c: unknown, m: string) => { console.log(`  ${c ? '✓' : '✗'} ${m}`); if (!c) fail++; };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const m1 = await startMock(8081, { printSeconds: 20 });
+const m1 = await startMock(8081, { printSeconds: 6 });
 const srv = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', '--import', 'tsx', 'src/server.ts'],
   { env: { ...process.env, PORT: String(PORT), DATA_DIR: dataDir, STAFF_PASSWORD: 'pw', POLL_MS: '500' }, stdio: 'ignore' });
 for (let i = 0; i < 80; i++) { if ((await fetch(BASE + '/api/config').catch(() => null))?.ok) break; await sleep(250); }
@@ -41,7 +41,9 @@ try {
   await form.locator('[name=password]').fill('test');
   await form.locator('[name=model]').fill('MK4S');
   await form.locator('[data-act=ptest]').click();
-  await page.waitForSelector('text=connected, state IDLE');
+  await page.waitForFunction(() => { const t = document.querySelector('[data-role=ptest-out]')?.textContent ?? ''; return t && t !== 'Testing…'; }, null, { timeout: 15000 });
+  const testOut = await page.locator('[data-role=ptest-out]').first().innerText();
+  if (!/connected, state IDLE/.test(testOut)) throw new Error(`printer test said: ${testOut}`);
   ok(true, 'UI: printer connection test shows IDLE');
   await form.locator('button.primary').click();
   await page.waitForSelector('h3:has-text("MK4S-Lab")');
@@ -64,7 +66,7 @@ try {
   await user.waitForSelector('text=File passed the automatic checks');
   const chosen = await user.locator('#filament option:checked').textContent();
   ok(/PLA – Red/.test(chosen ?? ''), `UI: nearest filament preselected from G-code colour (${chosen})`);
-  await user.fill('#name', 'Alice Example'); await user.fill('#notes', 'Please print slowly');
+  await user.fill('#name', 'Alice Example'); await user.fill('#email', 'alice@example.org'); await user.fill('#class', '2CE'); await user.fill('#notes', 'Please print slowly');
   await user.screenshot({ path: `${shots}/submit-ok.png` });
   await user.click('#send');
   await user.waitForSelector('table td:has-text("Alice Example")');
@@ -81,12 +83,51 @@ try {
   await page.waitForSelector('button[data-act=start]');
   await page.click('button[data-act=start]');
   await page.waitForFunction(() => document.body.innerText.includes('Ready to print (0)'), null, { timeout: 15000 });
+  for (let i = 0; i < 40 && m1.state.uploads.length < 1; i++) await sleep(250); // the upload finishes shortly after the queue count drops
   ok(m1.state.uploads.length === 1, 'UI: Start uploads the file to the printer');
   await user.click('a[data-r=printers]');
   await user.waitForSelector('.pill.PRINTING', { timeout: 15000 });
   await sleep(1500);
   await user.screenshot({ path: `${shots}/printers.png` });
   ok(await user.locator('text=Alice Example').count() >= 1, 'UI: printers page shows who is printing');
+  // a second request, refused by staff and then cleared from the list
+  await user.click('a[data-r=submit]');
+  await user.setInputFiles('#file', samples['good.gcode']);
+  await user.waitForSelector('text=File passed the automatic checks');
+  await user.fill('#name', 'Bob Sample'); await user.fill('#email', 'bob@example.org'); await user.fill('#class', '3GE');
+  await user.click('#send'); await user.waitForSelector('table td:has-text("Bob Sample")');
+  await page.click('button[data-t=review]'); await page.waitForSelector('text=From');
+  await page.click('button[data-act=reject]');
+  await page.waitForSelector('text=Refused and cancelled (1)');
+  await page.screenshot({ path: `${shots}/staff-refused.png` });
+  await page.click('button[data-act=refclear]');
+  await page.waitForFunction(() => !document.body.innerText.includes('Refused and cancelled'), null, { timeout: 8000 });
+  ok(true, 'UI: refused request cleared from the list');
+  // people: list, edit, statistics, add
+  for (let i = 0; i < 80; i++) { // wait (max 40 s) until the mock printer has finished the job
+    if (await page.evaluate(async () => (await (await fetch('/api/state')).json()).requests.some((r: any) => r.status === 'done'))) break;
+    await sleep(500);
+  }
+  await page.click('button[data-t=people]'); await page.waitForSelector('#p-table td:has-text("Alice Example")');
+  ok(await page.locator('#p-table tr:has-text("Alice Example") td:has-text("PLA")').count() >= 1, `UI: finished print shows in the statistics (${(await page.locator('#p-table tr:has-text("Alice Example")').innerText()).replace(/\s+/g, ' ')})`);
+  ok(await page.locator('#p-table td:has-text("alice@example.org")').count() === 1 && await page.locator('#p-table td:has-text("2CE")').count() >= 1, 'UI: people list shows e-mail and class');
+  ok(await page.locator('#p-table td:has-text("Bob Sample")').count() === 1, 'UI: second person was created too');
+  await page.locator('#p-table tr:has-text("Alice Example") button[data-act=pedit]').click();
+  await page.waitForSelector('#p-detail form[data-form=person]');
+  await page.screenshot({ path: `${shots}/staff-people.png`, fullPage: true });
+  await page.locator('#p-detail input[name=class]').fill('4GE');
+  await page.locator('#p-detail button.primary').click();
+  await page.waitForFunction(() => document.querySelector('#p-table')?.innerText.includes('4GE'), null, { timeout: 8000 });
+  ok(true, 'UI: edited class shows in the list');
+  await page.fill('#p-q', 'bob'); await page.waitForFunction(() => !document.querySelector('#p-table')?.innerText.includes('Alice'), null, { timeout: 8000 });
+  ok(await page.locator('#p-table tr:has-text("Bob Sample")').count() === 1, 'UI: search filters the list');
+  await page.fill('#p-q', ''); await page.waitForSelector('#p-table td:has-text("Alice Example")');
+  await page.click('button[data-act=pnew]');
+  await page.locator('#p-detail input[name=name]').fill('Sam Staff'); await page.locator('#p-detail input[name=email]').fill('sam@example.org');
+  await page.locator('#p-detail select[name=role]').selectOption('staff');
+  await page.locator('#p-detail button.primary').click();
+  await page.waitForSelector('#p-table td:has-text("Sam Staff")');
+  ok(true, 'UI: staff member added');
   await page.click('button[data-t=rules]'); await page.waitForSelector('text=Save rules');
   await page.screenshot({ path: `${shots}/staff-rules.png` });
   await page.click('button[data-t=filaments]'); await page.waitForSelector('text=Add');
