@@ -4,6 +4,8 @@ All notable changes are listed here. The version number lives in `package.json`;
 Format based on [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/) (0.x: the API may still change).
 
 ## [Unreleased]
+
+## [0.12.0] - 2026-11-03
 ### Added
 - People: every request is linked to a person (e-mail, class, role, notes). New *People* tab to list, search, filter, add, correct and remove students and staff, with CSV export.
 - Statistics per person, per material and per month (completed prints, plastic weight, print time; stopped prints count by progress), plus overall and per-class totals.
@@ -35,6 +37,7 @@ First tagged version.
 ### Known limitations
 - Not yet tested on real printers or on a real PrusaSlicer export (see README).
 
-[Unreleased]: https://github.com/kiischti/3DPMQ/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/kiischti/3DPMQ/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/kiischti/3DPMQ/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/kiischti/3DPMQ/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/kiischti/3DPMQ/releases/tag/v0.11.0
