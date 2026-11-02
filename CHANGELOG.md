@@ -4,6 +4,8 @@ All notable changes are listed here. The version number lives in `package.json`;
 Format based on [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/) (0.x: the API may still change).
 
 ## [Unreleased]
+
+## [0.13.0] - 2026-11-03
 ### Added
 - 3D preview of a request's toolpath (new window of a quarter of the screen): rotate with the mouse, zoom, move, layer slider, feature colours. Works for plain and binary G-code.
 
@@ -39,7 +41,8 @@ First tagged version.
 ### Known limitations
 - Not yet tested on real printers or on a real PrusaSlicer export (see README).
 
-[Unreleased]: https://github.com/kiischti/3DPMQ/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/kiischti/3DPMQ/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/kiischti/3DPMQ/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kiischti/3DPMQ/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/kiischti/3DPMQ/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/kiischti/3DPMQ/releases/tag/v0.11.0
