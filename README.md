@@ -46,6 +46,26 @@ Data (database, uploaded G-code) lives in the `3dpmq-data` volume, so it survive
 The container must be able to reach your printers' IP addresses (the same network as the printers).
 (The Dockerfile was written but **not yet built/tested** by its author; please report problems.)
 
+### Unraid
+GitHub Actions builds the image on every push to `main` (`.github/workflows/docker.yml`) and publishes it as `ghcr.io/<github-user>/3dpmq:latest` (lower-case).
+If the package is private, make it public under the repository's *Packages* settings, or Unraid cannot pull it.
+In the Unraid terminal create the data folder: `mkdir -p /mnt/user/appdata/3dpmq && chown 99:100 /mnt/user/appdata/3dpmq`.
+Then *Docker → Add Container* (switch to *Advanced View* for the last field):
+
+| Field | Value |
+|---|---|
+| Name | `3DPMQ` |
+| Repository | `ghcr.io/<github-user>/3dpmq:latest` |
+| Network Type | `bridge` (the server must be able to reach the printers' IP addresses) |
+| Port | container `3000` → host `3000` (or any free port) |
+| Path | container `/data` → host `/mnt/user/appdata/3dpmq` (read/write) |
+| Variable | `STAFF_PASSWORD` = a long password |
+| Variable | `TZ` = `Europe/Luxembourg` |
+| Extra Parameters | `--user 99:100` (Unraid's "nobody"; lets the app write to appdata) |
+| WebUI | `http://[IP]:[PORT:3000]/` |
+
+Updating: *Docker → Check for updates → apply*, or push a change and re-pull the image. Not yet tested on a real Unraid server.
+
 Try it without printers: `npm run mock` starts two fake PrusaLink printers on `:8081` / `:8082` (user `maker`, password `test`).
 
 ### Setting up a printer
