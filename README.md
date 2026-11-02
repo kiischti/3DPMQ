@@ -41,8 +41,10 @@ STAFF_PASSWORD='something-long' npm run dev     # http://localhost:3000
 npm run build && STAFF_PASSWORD='something-long' npm start
 ```
 
-Docker: `cp .env.example .env`, edit `STAFF_PASSWORD`, then `docker compose up -d --build`.
-(The Dockerfile was written but **not built/tested** in the environment where this was created.)
+Docker: `cp .env.example .env` (on Windows: `copy .env.example .env`), set `STAFF_PASSWORD` in `.env`, then `docker compose up -d --build`; open http://localhost:3000.
+Data (database, uploaded G-code) lives in the `3dpmq-data` volume, so it survives updates (`git pull && docker compose up -d --build`).
+The container must be able to reach your printers' IP addresses (the same network as the printers).
+(The Dockerfile was written but **not yet built/tested** by its author; please report problems.)
 
 Try it without printers: `npm run mock` starts two fake PrusaLink printers on `:8081` / `:8082` (user `maker`, password `test`).
 
