@@ -1,11 +1,11 @@
-# MakerQueue
+# 3DPMQ – 3D Printer Makerspace Queue
 
 Self-hosted print-request gateway for a makerspace with Prusa printers (PrusaLink).
 Sits between PrusaSlicer and the printers: users submit sliced G-code through a web page, the server
 **validates it**, **collects who/what filament**, staff **approve**, and the job is **queued and sent to a free printer**.
 
 ```
-PrusaSlicer ──export G-code──▶ MakerQueue (validate · name · filament · approve · queue) ──PrusaLink──▶ printers
+PrusaSlicer ──export G-code──▶ 3DPMQ (validate · name · filament · approve · queue) ──PrusaLink──▶ printers
 ```
 
 ## What it does
@@ -48,7 +48,7 @@ Try it without printers: `npm run mock` starts two fake PrusaLink printers on `:
 
 ### Setting up a printer
 1. On the printer enable PrusaLink (Settings → Network) and note the IP, username (`maker`) and password / API key.
-2. MakerQueue → Staff → Printers → *Add printer*: address `http://<ip>`, username, password,
+2. 3DPMQ → Staff → Printers → *Add printer*: address `http://<ip>`, username, password,
    **model exactly as in the G-code** (the `printer_model` value, e.g. `MK4S`, `MINI`, `XL`, `COREONE`), nozzle.
    Use *Test connection*, then set the loaded filament.
 3. Give users a PrusaSlicer tip: export with **Ctrl+G** and choose the right printer profile.
@@ -66,7 +66,7 @@ PrusaLink OpenAPI spec. Digest authentication was cross-checked with `curl` and 
 first-day checklist on one real printer:
 1. *Test connection* shows the right state (IDLE).
 2. Submit → approve → *Start* with a small file; confirm it appears on the printer and prints.
-3. Check the job finishes in MakerQueue (state `FINISHED`) and that *Stop* from the staff page works.
+3. Check the job finishes in 3DPMQ (state `FINISHED`) and that *Stop* from the staff page works.
 
 Specific assumptions to confirm on your firmware:
 - Printer state names (`IDLE, READY, PRINTING, PAUSED, FINISHED, STOPPED, ERROR, ATTENTION, BUSY`) and `job.progress` being 0–100.

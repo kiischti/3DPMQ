@@ -485,7 +485,7 @@ staff.get('/export.csv', (_req, res) => {
   const head = ['id', 'created_at', 'user_name', 'user_email', 'status', 'file_name', 'material', 'colour', 'grams', 'seconds', 'printer', 'started_at', 'finished_at', 'reviewed_by', 'reject_reason', 'error'];
   const lines = rows.map((r) => [r.id, r.created_at, r.user_name, r.user_email, r.status, r.file_name, r.material, r.colour_name, r.grams, r.seconds, r.printer_name, r.started_at, r.finished_at, r.reviewed_by, r.reject_reason, r.error].map(esc).join(','));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="makerqueue-export.csv"');
+  res.setHeader('Content-Disposition', 'attachment; filename="3dpmq-export.csv"');
   res.send([head.join(','), ...lines].join('\n'));
 });
 
@@ -617,7 +617,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 
 // ------------------------------------------------------------------ boot
 app.listen(PORT, () => {
-  console.log(`MakerQueue listening on http://localhost:${PORT}  (data: ${DATA_DIR})`);
+  console.log(`3DPMQ listening on http://localhost:${PORT}  (data: ${DATA_DIR})`);
   void tick();
   setInterval(() => void tick(), POLL_MS);
   setInterval(cleanup, 3600_000);

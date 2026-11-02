@@ -1,5 +1,5 @@
 {
-  "name": "makerqueue",
+  "name": "3dpmq",
   "version": "0.1.0",
   "description": "Self-hosted print request validation, approval and queue for makerspaces with PrusaLink printers",
   "main": "dist/server.js",

@@ -1,5 +1,5 @@
 services:
-  makerqueue:
+  3dpmq:
     build: .
     restart: unless-stopped
     ports: ["3000:3000"]
@@ -9,6 +9,6 @@ services:
       # POLL_MS: 5000
       # RETENTION_DAYS: 30
     volumes:
-      - makerqueue-data:/data
+      - 3dpmq-data:/data
 volumes:
-  makerqueue-data:
+  3dpmq-data:

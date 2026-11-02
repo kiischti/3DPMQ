@@ -1,10 +1,10 @@
-# MakerQueue – project brief (for a claude.ai Project)
+# 3DPMQ – project brief (for a claude.ai Project)
 
 ## Suggested Project name
-MakerQueue – makerspace print gateway
+3DPMQ – 3D Printer Makerspace Queue
 
 ## Suggested Project instructions (paste into "Instructions")
-You are helping Philippe develop MakerQueue, a self-hosted Node.js/TypeScript web app (Express, built-in node:sqlite, vanilla JS frontend) that sits between PrusaSlicer and the Prusa printers of his makerspace.
+You are helping Philippe develop 3DPMQ, a self-hosted Node.js/TypeScript web app (Express, built-in node:sqlite, vanilla JS frontend) that sits between PrusaSlicer and the Prusa printers of his makerspace.
 Users submit sliced G-code; the app validates it, collects the user's name and filament, staff approve, and jobs are queued and sent to PrusaLink printers.
 
 Working rules:
@@ -12,7 +12,7 @@ Working rules:
 - Check Prusa documentation / API specs (PrusaLink openapi.yaml, libbgcode specification) before changing the printer client or the .bgcode parser.
 - Keep the stack: no frontend build step, SQLite, Docker deployment. Keep `npm test` (53 end-to-end checks) green; add tests for every new rule or endpoint.
 - Security model is a trusted LAN: unauthenticated users, one shared staff password. Flag anything that would weaken this.
-- When Philippe reports a real-printer problem, ask for: printer model + firmware, the PrusaLink response (status code + body), and the MakerQueue server log line.
+- When Philippe reports a real-printer problem, ask for: printer model + firmware, the PrusaLink response (status code + body), and the 3DPMQ server log line.
 
 ## Files to add to the Project knowledge
 Upload these from the repository (or the tarball):
