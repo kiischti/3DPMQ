@@ -1,12 +1,11 @@
 /**
  * Generates synthetic PrusaSlicer-style G-code samples for the tests.
  * The ASCII layout (trailing stats comments + "prusaslicer_config" block) follows what PrusaSlicer writes;
- * the .bgcode sample is built from the libbgcode specification. Neither is a real slicer export, so
- * always try a real file from your own PrusaSlicer before relying on this.
+ * The .bgcode samples are real output of Prusa's own libbgcode encoder (test/fixtures), made from synthetic G-code.
+ * Neither is a real slicer export, so always try a real file from your own PrusaSlicer before relying on this.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import zlib from 'node:zlib';
 
 export interface SampleOpts {
   generator?: string; model?: string; type?: string; colour?: string; grams?: number; time?: string;
@@ -35,36 +34,10 @@ export function asciiGcode(o: SampleOpts = {}): string {
   return out.join('\n') + '\n';
 }
 
-function block(type: number, comp: number, params: Buffer, data: Buffer, crc: boolean) {
-  const payload = comp === 1 ? zlib.deflateSync(data) : data;
-  const h = Buffer.alloc(comp === 0 ? 8 : 12);
-  h.writeUInt16LE(type, 0); h.writeUInt16LE(comp, 2); h.writeUInt32LE(data.length, 4);
-  if (comp !== 0) h.writeUInt32LE(payload.length, 8);
-  return Buffer.concat([h, params, payload, crc ? Buffer.alloc(4) : Buffer.alloc(0)]);
-}
-
-export function bgcode(o: SampleOpts = {}, crc = true): Buffer {
-  const ini = (kv: Record<string, string | number>) => Buffer.from(Object.entries(kv).map(([k, v]) => `${k}=${v}`).join('\n') + '\n');
-  const model = o.model ?? 'MK4S', type = o.type ?? 'PLA';
-  const hdr = Buffer.alloc(10); hdr.write('GCDE', 0, 'latin1'); hdr.writeUInt32LE(1, 4); hdr.writeUInt16LE(crc ? 1 : 0, 8);
-  const p0 = Buffer.alloc(2); // INI encoding
-  const thumbParams = Buffer.alloc(6); thumbParams.writeUInt16LE(0, 0); thumbParams.writeUInt16LE(16, 2); thumbParams.writeUInt16LE(16, 4);
-  return Buffer.concat([
-    hdr,
-    block(0, 0, p0, ini({ Producer: o.generator ?? 'PrusaSlicer 2.9.2' }), crc),
-    block(3, 1, p0, ini({ printer_model: model, filament_type: type, nozzle_diameter: o.nozzle ?? 0.4, layer_height: 0.2, max_layer_z: 45.2, 'filament used [g]': o.grams ?? 12.34, 'estimated printing time (normal mode)': o.time ?? '1h 12m 5s' }), crc),
-    block(5, 0, thumbParams, Buffer.alloc(40, 1), crc),
-    block(4, 0, p0, ini({ 'filament used [g]': o.grams ?? 12.34 }), crc),
-    block(2, 1, p0, ini({ printer_model: model, filament_type: type, filament_colour: o.colour ?? '#FF8000', printer_settings_id: 'Original Prusa MK4S' }), crc),
-    block(1, 0, p0, Buffer.from('G28\nG1 X10 Y10\n'), crc), // fake G-code block (must stop the parser)
-  ]);
-}
-
 export function writeSamples(dir: string): Record<string, string> {
   fs.mkdirSync(dir, { recursive: true });
   const files: Record<string, string | Buffer> = {
     'good.gcode': asciiGcode(),
-    'good.bgcode': bgcode(),
     'good-red.gcode': asciiGcode({ colour: '#D62828' }),
     'petg.gcode': asciiGcode({ type: 'PETG', colour: '#1A1A1A', nozzleTemp: 240, bedTemp: 80 }),
     'too-hot.gcode': asciiGcode({ type: 'PETG', nozzleTemp: 300 }),
@@ -82,6 +55,10 @@ export function writeSamples(dir: string): Record<string, string> {
   };
   const paths: Record<string, string> = {};
   for (const [n, c] of Object.entries(files)) { const p = path.join(dir, n); fs.writeFileSync(p, c); paths[n] = p; }
+  const fx = path.resolve('test/fixtures');
+  for (const [name, src] of Object.entries({ 'good.bgcode': 'sample-slicer-style.bgcode', 'hot.bgcode': 'sample-hot.bgcode', 'deflate.bgcode': 'sample-deflate.bgcode' })) {
+    const p = path.join(dir, name); fs.copyFileSync(path.join(fx, src), p); paths[name] = p;
+  }
   return paths;
 }
 

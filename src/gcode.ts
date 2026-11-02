@@ -1,7 +1,9 @@
 import fs from 'node:fs';
-import readline from 'node:readline';
-import zlib from 'node:zlib';
 import type { Rules } from './db.js';
+import { scanAscii, type ScanResult } from './scan.js';
+import { readBgcodeMetadata, scanBgcode } from './bgcode.js';
+
+export { scanAscii, type ScanResult };
 
 export interface GcodeMeta {
   format: 'gcode' | 'bgcode';
@@ -16,15 +18,6 @@ export interface GcodeMeta {
   nozzleDiameter?: number;
   maxZ?: number;
   keys: number;                    // how many metadata keys were found (diagnostics)
-}
-
-export interface ScanResult {
-  scanned: boolean;                // false for bgcode (compressed G-code blocks are not scanned)
-  lines: number;
-  maxNozzleTemp: number;
-  maxBedTemp: number;
-  flagged: Record<string, number>; // command -> count
-  filamentChanges: number;         // M600 / M0 / M1 style pauses
 }
 
 export type Level = 'error' | 'warn' | 'info';
@@ -128,83 +121,15 @@ function parseAscii(file: string): GcodeMeta {
   }
 }
 
-/** Streams the whole file once and checks for commands a makerspace may not want to run unattended. */
-export async function scanAscii(file: string): Promise<ScanResult> {
-  const res: ScanResult = { scanned: true, lines: 0, maxNozzleTemp: 0, maxBedTemp: 0, flagged: {}, filamentChanges: 0 };
-  const rl = readline.createInterface({ input: fs.createReadStream(file), crlfDelay: Infinity });
-  const FLAG = new Set(['M997', 'M500', 'M501', 'M502', 'M503', 'M301', 'M303', 'M112', 'M999', 'M502', 'M92', 'M906', 'M913', 'M122', 'M355']);
-  for await (const raw of rl) {
-    res.lines++;
-    const semi = raw.indexOf(';');
-    const line = (semi >= 0 ? raw.slice(0, semi) : raw).trim().toUpperCase();
-    if (!line) continue;
-    const m = /^(?:N\d+\s*)?([GM]\d+(?:\.\d+)?)/.exec(line);
-    if (!m) continue;
-    const cmd = m[1];
-    if (cmd === 'M104' || cmd === 'M109') {
-      const s = /\bS(-?[\d.]+)/.exec(line);
-      if (s) res.maxNozzleTemp = Math.max(res.maxNozzleTemp, parseFloat(s[1]));
-    } else if (cmd === 'M140' || cmd === 'M190') {
-      const s = /\bS(-?[\d.]+)/.exec(line);
-      if (s) res.maxBedTemp = Math.max(res.maxBedTemp, parseFloat(s[1]));
-    } else if (cmd === 'M600' || cmd === 'M0' || cmd === 'M1' || cmd === 'M601') {
-      res.filamentChanges++;
-    } else if (FLAG.has(cmd)) {
-      res.flagged[cmd] = (res.flagged[cmd] ?? 0) + 1;
-    }
-  }
-  return res;
+// ---------------------------------------------------------------- binary .bgcode (decoder lives in bgcode.ts)
+function parseBgcode(file: string): GcodeMeta {
+  const { kv, generator } = readBgcodeMetadata(file);
+  return metaFromKeys('bgcode', kv, generator);
 }
 
-// ---------------------------------------------------------------- binary .bgcode
-// Layout per prusa3d/libbgcode doc/specifications.md:
-//  header: "GCDE"(4) | version u32 | checksum type u16            (all little endian)
-//  block : type u16 | compression u16 | uncompressed u32 | [compressed u32 if compression != 0]
-//          | params (2 bytes; 6 for thumbnails) | data | checksum (4 bytes if checksum type == 1)
-//  order : file meta(0), printer meta(3), thumbnails(5), print meta(4), slicer meta(2), G-code(1)*
-function parseBgcode(file: string): GcodeMeta {
-  const fd = fs.openSync(file, 'r');
-  try {
-    const size = fs.fstatSync(fd).size;
-    const hdr = Buffer.alloc(10);
-    fs.readSync(fd, hdr, 0, 10, 0);
-    if (hdr.toString('latin1', 0, 4) !== 'GCDE') throw new Error('Not a binary G-code file (bad magic)');
-    const checksumType = hdr.readUInt16LE(8);
-    const csSize = checksumType === 1 ? 4 : 0;
-    let pos = 10;
-    const kv: Record<string, string> = {};
-    let generator = '';
-    while (pos + 8 <= size) {
-      const bh = Buffer.alloc(12);
-      fs.readSync(fd, bh, 0, 12, pos);
-      const type = bh.readUInt16LE(0);
-      const comp = bh.readUInt16LE(2);
-      const uncompressed = bh.readUInt32LE(4);
-      const compressed = comp === 0 ? uncompressed : bh.readUInt32LE(8);
-      const headerSize = comp === 0 ? 8 : 12;
-      const paramsSize = type === 5 ? 6 : 2;
-      const dataStart = pos + headerSize + paramsSize;
-      if (type === 1) break; // first G-code block: all metadata is behind us
-      if (type === 0 || type === 2 || type === 3 || type === 4) {
-        let data = Buffer.alloc(compressed);
-        fs.readSync(fd, data, 0, compressed, dataStart);
-        if (comp === 1) data = zlib.inflateSync(data);
-        else if (comp !== 0) throw new Error(`Unsupported metadata compression ${comp} (heatshrink)`);
-        for (const line of data.toString('utf8').split(/\r?\n/)) {
-          const i = line.indexOf('=');
-          if (i > 0) {
-            const k = line.slice(0, i).trim();
-            if (!(k in kv)) kv[k] = line.slice(i + 1).trim();
-            if (k.toLowerCase() === 'producer') generator = line.slice(i + 1).trim();
-          }
-        }
-      }
-      pos = dataStart + compressed + csSize;
-    }
-    return metaFromKeys('bgcode', kv, generator);
-  } finally {
-    fs.closeSync(fd);
-  }
+/** Scans the whole file for temperatures and risky commands, for both plain and binary G-code. */
+export async function scanFile(file: string, fileName: string): Promise<ScanResult> {
+  return detectFormat(fileName) === 'bgcode' ? scanBgcode(file) : scanAscii(file);
 }
 
 export function detectFormat(fileName: string): 'gcode' | 'bgcode' | null {
@@ -256,7 +181,7 @@ export function validate(
   }
   if (meta.keys < 5) err('no-metadata', 'No slicer metadata found in this file. Please export directly from PrusaSlicer.');
 
-  if (rules.requirePrusaSlicer && !/prusaslicer|prusa-slicer/i.test(meta.generator) && meta.format === 'gcode') {
+  if (rules.requirePrusaSlicer && !/prusaslicer|prusa-slicer/i.test(meta.generator)) {
     err('slicer', `This file was generated by "${meta.generator || 'an unknown program'}". Please slice with PrusaSlicer.`);
   }
 
@@ -315,8 +240,8 @@ export function validate(
     const bad = Object.entries(scan.flagged);
     if (bad.length) err('forbidden-gcode', `The file contains commands that change printer settings or firmware: ${bad.map(([c, n]) => `${c}×${n}`).join(', ')}.`);
     if (scan.filamentChanges > 0) warn('pauses', `The file pauses the printer ${scan.filamentChanges}× (M600/M0/M1). Someone must be at the printer.`);
-  } else if (meta.format === 'bgcode') {
-    warn('bgcode-unscanned', 'Binary G-code: commands and temperatures inside the file could not be checked. Staff should review this one more carefully.');
+  } else {
+    warn('unscanned', 'The G-code commands in this file could not be checked automatically. Staff should review it more carefully.');
   }
 
   return out;

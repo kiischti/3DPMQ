@@ -66,8 +66,11 @@ try {
   ok(r.ok && r.meta.printerModel === 'MK4S' && r.meta.filamentTypes[0] === 'PLA' && r.meta.seconds === 4325 && Math.abs(r.meta.grams - 12.34) < 0.01, `good.gcode parsed (model ${r.meta.printerModel}, ${r.meta.seconds}s, ${r.meta.grams}g)`);
   ok(r.meta.filamentColours[0] === '#FF8000' && r.meta.layerHeight === 0.2 && r.meta.nozzleDiameter === 0.4, 'colour / layer height / nozzle parsed');
   r = await v('good.bgcode', pla.id);
-  ok(r.ok && r.meta.format === 'bgcode' && r.meta.printerModel === 'MK4S' && r.meta.seconds === 4325 && r.meta.filamentColours[0] === '#FF8000', 'synthetic .bgcode parsed (deflate + plain blocks)');
-  ok(codes(r).includes('bgcode-unscanned'), 'bgcode flagged as not command-scanned');
+  ok(r.ok && r.meta.format === 'bgcode' && r.meta.printerModel === 'MK4S' && r.meta.seconds === 4325 && r.meta.filamentColours[0] === '#FF8000' && /PrusaSlicer/.test(r.meta.generator),
+    `real .bgcode (Prusa encoder, heatshrink + MeatPack) parsed: ${r.meta.printerModel}, ${r.meta.filamentTypes}, ${r.meta.seconds}s, ${r.meta.grams}g`);
+  ok(!codes(r).includes('unscanned') && !codes(r).includes('bgcode-unscanned'), '.bgcode content is scanned (no "unscanned" warning)');
+  ok((await v('deflate.bgcode', pla.id)).ok, '.bgcode with deflate blocks accepted');
+  ok(codes(await v('hot.bgcode', pla.id)).includes('nozzle-temp'), '.bgcode: nozzle temperature inside compressed G-code is enforced');
   ok(codes(await v('too-hot.gcode', petg.id)).includes('nozzle-temp'), 'nozzle temp over limit rejected');
   ok(codes(await v('too-heavy.gcode', pla.id)).includes('too-heavy'), 'too heavy rejected');
   ok(codes(await v('too-long.gcode', pla.id)).includes('too-long'), 'too long rejected');

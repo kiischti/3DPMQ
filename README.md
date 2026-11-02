@@ -78,7 +78,8 @@ Try it without printers: `npm run mock` starts two fake PrusaLink printers on `:
 Environment variables: `STAFF_PASSWORD` (required), `PORT`, `DATA_DIR`, `POLL_MS`, `MAX_UPLOAD_MB`, `RETENTION_DAYS` (G-code files of finished jobs are deleted after this), `SESSION_SECRET`.
 
 ## Tests
-- `npm test` — end-to-end: real server + two mock printers; 53 checks (validation rules, approval, upload, auto-start, limits, access control).
+- `npm test` — (1) `.bgcode` reader checks on real encoder output in `test/fixtures`, (2) end-to-end with a real server and two mock printers: validation rules, approval, upload, auto-start, limits, access control.
+- `BGCODE_BIN=/path/to/bgcode npx tsx test/bgcode.ts` — full cross-check: encodes the sample with every compression / encoding / checksum combination using Prusa's `bgcode` tool (build it from https://github.com/prusa3d/libbgcode) and compares the decoded commands with the original.
 - `npx tsx test/ui.ts` — drives the web UI in headless Chromium and saves screenshots to `test/shots/`.
 
 ## Honest limitations — read before relying on it
@@ -96,9 +97,11 @@ Specific assumptions to confirm on your firmware:
 - Default storage name is `usb`; change it per printer if yours differs (e.g. `local`).
 - Uploaded files are named `MQ<id>.gcode` / `.bgcode` on the printer's storage and are not deleted afterwards.
 
-**Binary G-code (`.bgcode`).** Metadata is read (format taken from the libbgcode specification and tested on a synthetic
-file, not a real PrusaSlicer export). The G-code *inside* is compressed, so temperatures/forbidden commands cannot be
-scanned; such files get a warning. If you want the full scan for everything, turn off *Binary G-code* in PrusaSlicer's printer settings, or set a rule/process that rejects `.bgcode`.
+**Binary G-code (`.bgcode`).** Fully read: metadata and the G-code itself, with all compression types (none, Deflate,
+Heatshrink 11/4 and 12/4), all encodings (plain, MeatPack, MeatPack with comments) and CRC32 checks, so the same limits
+(temperatures, forbidden commands, pauses) apply as for plain G-code. This was verified against Prusa's own open-source
+encoder (libbgcode) on 96 combinations of settings, but **not yet on a file exported by your PrusaSlicer**. If a real
+export is rejected as unreadable, please report it. Corrupt or truncated files are rejected. Scanning takes roughly 1.5 s per 8 MB of binary file.
 
 **Security model is deliberately simple** — meant for a trusted LAN:
 - Users are not authenticated: the name is whatever they type. Staff share one password (12 h cookie, login rate-limited).
@@ -140,11 +143,13 @@ If you re-use the dependency list, re-run a license check after adding packages 
 
 ## Layout
 ```
-src/gcode.ts      G-code / bgcode metadata parser, command scanner, validation rules
+src/gcode.ts      G-code metadata parser, validation rules
+src/scan.ts       line scanner (temperatures, forbidden commands)
+src/bgcode.ts     binary G-code reader (Heatshrink, MeatPack, Deflate, CRC32)
 src/prusalink.ts  PrusaLink v1 client with HTTP Digest auth
 src/server.ts     REST API, queue, scheduler/poller, SSE, staff auth
 src/db.ts         SQLite schema, rules
 public/           web UI (no build step)
 mock/             fake PrusaLink printers
-test/             end-to-end + UI tests, sample G-code generator
+test/             .bgcode + end-to-end + UI tests, fixtures, sample G-code generator
 ```

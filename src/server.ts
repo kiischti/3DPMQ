@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DATA_DIR, UPLOAD_DIR, audit, db, getRules, getSecret, setRules, type Rules } from './db.js';
 import {
-  detectFormat, hasErrors, modelEquals, parseMeta, scanAscii, validate,
+  detectFormat, hasErrors, modelEquals, parseMeta, scanFile, validate,
   type FilamentLite, type GcodeMeta, type Issue, type PrinterLite, type ScanResult,
 } from './gcode.js';
 import { PrusaLink, type JobInfo, type PrinterStatus } from './prusalink.js';
@@ -286,8 +286,7 @@ async function analyse(file: Express.Multer.File, filamentId: number | undefined
   if (fmt) {
     try {
       meta = parseMeta(file.path, file.originalname);
-      scan = fmt === 'gcode' ? await scanAscii(file.path)
-        : { scanned: false, lines: 0, maxNozzleTemp: 0, maxBedTemp: 0, flagged: {}, filamentChanges: 0 };
+      scan = await scanFile(file.path, file.originalname);
     } catch (e: any) { parseError = e.message; }
   }
   const issues = validate(meta, scan, rules, {
