@@ -53,3 +53,6 @@ th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: v
 details > summary { cursor: pointer; font-weight: 600; } details[open] > summary { margin-bottom: 8px; }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 10px; z-index: 20; max-width: 90vw; }
 .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; } @media (max-width: 700px) { .cols2 { grid-template-columns: 1fr; } header { flex-wrap: wrap; } }
+
+.foot { max-width: 1100px; margin: 0 auto; padding: 0 16px 28px; color: var(--muted); font-size: 12px; }
+.foot a { color: inherit; }

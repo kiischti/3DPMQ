@@ -54,6 +54,7 @@ try {
   user.on('pageerror', (e: Error) => errors.push('user: ' + e.message));
   user.on('console', (m: any) => { if (m.type() === 'error') errors.push('user: ' + m.text()); });
   await user.goto(BASE);
+  ok(/3DPMQ v\d+\.\d+\.\d+ · AGPL/.test(await user.locator('#foot').innerText()), `UI: version shown in the footer (${await user.locator('#foot').innerText()})`);
   await user.setInputFiles('#file', samples['too-hot.gcode']);
   await user.waitForSelector('.issue.error');
   ok(await user.locator('#send').isDisabled(), 'UI: send disabled for a file with errors');

@@ -77,6 +77,18 @@ Try it without printers: `npm run mock` starts two fake PrusaLink printers on `:
 
 Environment variables: `STAFF_PASSWORD` (required), `PORT`, `DATA_DIR`, `POLL_MS`, `MAX_UPLOAD_MB`, `RETENTION_DAYS` (G-code files of finished jobs are deleted after this), `SESSION_SECRET`.
 
+## Releases and versions
+The version lives in one place, `package.json`, and is shown in the page footer, the server log and `/api/config`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+Numbers follow `MAJOR.MINOR.PATCH` (`0.11.0` = "version 0.11"): bump the minor number for new features, the patch number for fixes.
+
+To publish a new version:
+1. Add the changes under `## [Unreleased]` in `CHANGELOG.md` while you work. When releasing, rename that heading to the new version and date and add a fresh empty `[Unreleased]` above it.
+2. Commit, then run `npm version minor` (or `patch`). This updates `package.json` and `package-lock.json`, commits, and creates the git tag `v0.12.0`. (`npm version 0.12.0` sets an exact number.)
+3. `git push --follow-tags`. GitHub Actions then builds the image and publishes it as `ghcr.io/<github-user>/3dpmq:0.12.0` **and** `:latest`.
+
+On Unraid you can pin the exact version (`...:0.12.0`) in the container's *Repository* field instead of `:latest`, so updates only happen when you change it.
+Optional: set `SOURCE_URL` (environment variable) to your repository address to show a "source code" link in the footer.
+
 ## Tests
 - `npm test` — (1) `.bgcode` reader checks on real encoder output in `test/fixtures`, (2) end-to-end with a real server and two mock printers: validation rules, approval, upload, auto-start, limits, access control.
 - `BGCODE_BIN=/path/to/bgcode npx tsx test/bgcode.ts` — full cross-check: encodes the sample with every compression / encoding / checksum combination using Prusa's `bgcode` tool (build it from https://github.com/prusa3d/libbgcode) and compares the decoded commands with the original.

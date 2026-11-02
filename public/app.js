@@ -50,7 +50,11 @@ function connect() {
   es.addEventListener('update', (e) => { state = JSON.parse(e.data); $('#conn').classList.add('on'); live(); });
   es.onerror = () => $('#conn').classList.remove('on');
 }
-async function loadConfig() { config = await api('GET', '/api/config'); }
+async function loadConfig() {
+  config = await api('GET', '/api/config');
+  const f = $('#foot');
+  if (f) f.innerHTML = `3DPMQ v${esc(config.version)} · AGPL-3.0-or-later` + (config.source_url ? ` · <a href="${esc(config.source_url)}" rel="noopener">source code</a>` : '');
+}
 
 // ---------------------------------------------------------------- router
 const routes = { submit: renderSubmit, queue: renderQueue, printers: renderPrinters, staff: renderStaff };

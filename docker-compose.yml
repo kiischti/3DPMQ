@@ -9,6 +9,7 @@ services:
       # SESSION_SECRET: optional; generated and stored in the database if unset
       # POLL_MS: 5000
       # RETENTION_DAYS: 30
+      # SOURCE_URL: https://github.com/<user>/3DPMQ
     volumes:
       - 3dpmq-data:/data
 volumes:

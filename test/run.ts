@@ -41,6 +41,8 @@ await waitFor(async () => (await fetch(BASE + '/api/config').catch(() => null))?
 try {
   console.log('\nValidation');
   const cfg = (await api('GET', '/api/config')).data;
+  const pkgVersion = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+  ok(cfg.version === pkgVersion && /^\d+\.\d+\.\d+/.test(cfg.version), `/api/config reports the version from package.json (${cfg.version})`);
   const pla = cfg.filaments.find((f: any) => f.material === 'PLA' && f.colour_name === 'Black');
   const red = cfg.filaments.find((f: any) => f.colour_name === 'Red');
   const petg = cfg.filaments.find((f: any) => f.material === 'PETG' && f.colour_name === 'Black');

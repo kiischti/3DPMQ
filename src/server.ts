@@ -10,6 +10,7 @@ import {
   type FilamentLite, type GcodeMeta, type Issue, type PrinterLite, type ScanResult,
 } from './gcode.js';
 import { PrusaLink, type JobInfo, type PrinterStatus } from './prusalink.js';
+import { SOURCE_URL, VERSION } from './version.js';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const POLL_MS = parseInt(process.env.POLL_MS ?? '5000', 10);
@@ -317,6 +318,7 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown> | unknown) =
 app.get('/api/config', (_req, res) => {
   const rules = getRules();
   res.json({
+    version: VERSION, source_url: SOURCE_URL || null,
     rules: { ...rules },
     filaments: all('SELECT * FROM filaments WHERE in_stock = 1 ORDER BY material, colour_name'),
     printer_models: [...new Set(allPrinters().filter((p) => p.enabled).map((p) => p.model).filter(Boolean))],
@@ -616,7 +618,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 
 // ------------------------------------------------------------------ boot
 app.listen(PORT, () => {
-  console.log(`3DPMQ listening on http://localhost:${PORT}  (data: ${DATA_DIR})`);
+  console.log(`3DPMQ v${VERSION} listening on http://localhost:${PORT}  (data: ${DATA_DIR})`);
   void tick();
   setInterval(() => void tick(), POLL_MS);
   setInterval(cleanup, 3600_000);
