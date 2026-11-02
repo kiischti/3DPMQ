@@ -6,6 +6,9 @@ COPY src ./src
 RUN npx tsc
 
 FROM node:22-alpine
+LABEL org.opencontainers.image.title="3DPMQ" \
+      org.opencontainers.image.description="3D Printer Makerspace Queue: validation, approval and queue for Prusa printers (PrusaLink)" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
 WORKDIR /app
 ENV NODE_ENV=production DATA_DIR=/data PORT=3000
 COPY package*.json ./

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="3DPMQ">
+  <title>3DPMQ</title>
+  <rect width="512" height="512" rx="96" fill="#1d2330"/>
+  <g transform="translate(256 262) scale(0.92) translate(-256 -265)">
+  <g stroke-linejoin="round">
+    <polygon fill="#4b566b" points="126,302 256,377 256,435 126,360"/>
+    <polygon fill="#6b7893" points="256,377 386,302 386,360 256,435"/>
+    <polygon fill="#4b566b" points="126,236 256,311 256,369 126,294"/>
+    <polygon fill="#6b7893" points="256,311 386,236 386,294 256,369"/>
+    <polygon fill="#4b566b" points="126,170 256,245 256,303 126,228"/>
+    <polygon fill="#6b7893" points="256,245 386,170 386,228 256,303"/>
+    <polygon fill="#fa6831" points="256,95 386,170 256,245 126,170"/>
+  </g>
+  <g stroke="#ffc2a3" stroke-width="9" stroke-linecap="round">
+    <line x1="256.0" y1="125.0" x2="334.0" y2="170.0"/>
+    <line x1="236.5" y1="136.2" x2="314.5" y2="181.2"/>
+    <line x1="217.0" y1="147.5" x2="295.0" y2="192.5"/>
+    <line x1="197.5" y1="158.8" x2="275.5" y2="203.8"/>
+    <line x1="178.0" y1="170.0" x2="256.0" y2="215.0"/>
+  </g>
+  </g>
+</svg>

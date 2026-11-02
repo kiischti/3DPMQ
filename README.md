@@ -1,3 +1,5 @@
+<p align="center"><img src="public/icon-512.png" alt="3DPMQ logo" width="128"></p>
+
 # 3DPMQ – 3D Printer Makerspace Queue
 
 Self-hosted print-request gateway for a makerspace with Prusa printers (PrusaLink).
@@ -88,6 +90,12 @@ To publish a new version:
 
 On Unraid you can pin the exact version (`...:0.12.0`) in the container's *Repository* field instead of `:latest`, so updates only happen when you change it.
 Optional: set `SOURCE_URL` (environment variable) to your repository address to show a "source code" link in the footer.
+
+### Logo and icons
+`public/logo.svg` (mark, transparent) and `public/favicon.svg` (app icon with background) are the sources; `icon-512.png`, `icon-192.png`, `apple-touch-icon.png` and `favicon.ico` are exported from them.
+The logo is an original design (a block of printed layers, top layer with infill lines) released under the same license as the code.
+For the Unraid Docker tab, set the container's *Icon URL* (Advanced View) to
+`https://raw.githubusercontent.com/<github-user>/3DPMQ/main/public/icon-512.png`; this works once the repository is public.
 
 ## Tests
 - `npm test` — (1) `.bgcode` reader checks on real encoder output in `test/fixtures`, (2) end-to-end with a real server and two mock printers: validation rules, approval, upload, auto-start, limits, access control.

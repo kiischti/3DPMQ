@@ -47,6 +47,10 @@ try {
   const red = cfg.filaments.find((f: any) => f.colour_name === 'Red');
   const petg = cfg.filaments.find((f: any) => f.material === 'PETG' && f.colour_name === 'Black');
 
+  for (const [file, type] of [['favicon.svg', 'image/svg+xml'], ['logo.svg', 'image/svg+xml'], ['icon-512.png', 'image/png'], ['favicon.ico', 'image/'], ['site.webmanifest', 'manifest']]) {
+    const r = await fetch(`${BASE}/${file}`);
+    ok(r.ok && (r.headers.get('content-type') ?? '').includes(type), `logo asset /${file} is served (${r.headers.get('content-type')})`);
+  }
   // staff + printers
   ok((await api('POST', '/api/staff/login', { password: 'nope' })).status === 401, 'wrong staff password rejected');
   ok((await api('POST', '/api/staff/login', { password: 'pw', name: 'Tester' })).status === 200, 'staff login');

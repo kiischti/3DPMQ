@@ -4,6 +4,8 @@ All notable changes are listed here. The version number lives in `package.json`;
 Format based on [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/) (0.x: the API may still change).
 
 ## [Unreleased]
+### Added
+- Logo and icons: header logo, favicon (SVG + ICO), Apple touch icon, web app manifest, 512 px icon for Unraid / README, image labels in the Dockerfile.
 
 ## [0.11.0] - 2026-11-02
 First tagged version.
