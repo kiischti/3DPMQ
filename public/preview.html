@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3D preview – 3DPMQ</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <style>
+    html, body { margin: 0; height: 100%; background: #12161c; color: #e8ebf0; font: 12px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+    canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+    canvas.drag { cursor: grabbing; }
+    .panel { position: fixed; background: rgba(18, 22, 28, .82); border: 1px solid #2d343e; border-radius: 8px; padding: 6px 9px; backdrop-filter: blur(4px); }
+    #title { top: 8px; left: 8px; max-width: 55%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #title b { font-size: 13px; }
+    #legend { top: 8px; right: 8px; min-width: 140px; max-height: calc(100% - 90px); overflow: auto; }
+    #legend label { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 1px 0; white-space: nowrap; }
+    #legend .sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+    #legend select, #legend button { width: 100%; margin-top: 5px; background: #1d2229; color: inherit; border: 1px solid #2d343e; border-radius: 5px; padding: 3px 5px; font: inherit; cursor: pointer; }
+    #legend button:hover, #legend select:hover { border-color: #fa6831; }
+    #info { bottom: 8px; left: 8px; max-width: 45%; color: #98a2b3; }
+    #layerbox { bottom: 8px; right: 8px; display: flex; align-items: center; gap: 8px; width: min(380px, 50%); }
+    #layerbox input { flex: 1; accent-color: #fa6831; min-width: 60px; }
+    #layerlabel { white-space: nowrap; min-width: 100px; text-align: right; }
+    #msg { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px; color: #98a2b3; font-size: 14px; pointer-events: none; }
+    #warn { top: 38px; left: 8px; color: #f2b24c; max-width: 55%; }
+    #help { bottom: 60px; left: 8px; color: #6b7893; font-size: 11px; background: none; border: 0; padding: 0; backdrop-filter: none; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+  <div id="msg">Preparing the preview…</div>
+  <div id="title" class="panel" hidden></div>
+  <div id="warn" class="panel" hidden></div>
+  <div id="legend" class="panel" hidden></div>
+  <div id="info" class="panel" hidden></div>
+  <div id="help" class="panel" hidden>Drag: rotate · Wheel: zoom · Right-drag or Shift-drag: move · Double-click: reset · ↑/↓: layer</div>
+  <div id="layerbox" class="panel" hidden><input id="layer" type="range" min="1" max="1" value="1"><span id="layerlabel"></span></div>
+  <script src="preview.js"></script>
+</body>
+</html>

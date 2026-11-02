@@ -189,42 +189,36 @@ export function readBgcodeMetadata(file: string): { kv: Record<string, string>; 
   } finally { fs.closeSync(fd); }
 }
 
-/** Decodes every G-code block and runs the same line checks as for plain G-code. */
-export async function scanBgcode(file: string): Promise<ScanResult> {
+/** Yields the decoded G-code text of each G-code block, in file order. */
+export function* bgcodeTextBlocks(file: string): Generator<string> {
   const fd = fs.openSync(file, 'r');
   try {
     const size = fs.fstatSync(fd).size;
     const { checksum } = readHeader(fd, size);
-    const sc = new LineScanner();
-    let n = 0;
     for (const b of blocks(fd, size, checksum)) {
       if (b.type !== 1) continue;
       let data = blockData(fd, b, checksum);
       const enc = b.params.readUInt16LE(0);
       if (enc === 1 || enc === 2) data = meatpackDecode(data);
       else if (enc !== 0) throw new Error(`Unknown G-code encoding ${enc}`);
-      sc.pushText(data.toString('latin1'));
-      if (++n % 64 === 0) await new Promise((r) => setImmediate(r)); // keep the server responsive on big files
+      yield data.toString('latin1');
     }
-    if (n === 0) throw new Error('Binary G-code contains no G-code blocks');
-    return sc.finish();
   } finally { fs.closeSync(fd); }
+}
+
+/** Decodes every G-code block and runs the same line checks as for plain G-code. */
+export async function scanBgcode(file: string): Promise<ScanResult> {
+  const sc = new LineScanner();
+  let n = 0;
+  for (const text of bgcodeTextBlocks(file)) {
+    sc.pushText(text);
+    if (++n % 64 === 0) await new Promise((r) => setImmediate(r)); // keep the server responsive on big files
+  }
+  if (n === 0) throw new Error('Binary G-code contains no G-code blocks');
+  return sc.finish();
 }
 
 /** For tests: the decoded G-code text of the whole file. */
 export function decodeBgcodeText(file: string): string {
-  const fd = fs.openSync(file, 'r');
-  try {
-    const size = fs.fstatSync(fd).size;
-    const { checksum } = readHeader(fd, size);
-    const parts: string[] = [];
-    for (const b of blocks(fd, size, checksum)) {
-      if (b.type !== 1) continue;
-      let data = blockData(fd, b, checksum);
-      const enc = b.params.readUInt16LE(0);
-      if (enc === 1 || enc === 2) data = meatpackDecode(data);
-      parts.push(data.toString('latin1'));
-    }
-    return parts.join('');
-  } finally { fs.closeSync(fd); }
+  return [...bgcodeTextBlocks(file)].join('');
 }

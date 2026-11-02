@@ -4,6 +4,8 @@ All notable changes are listed here. The version number lives in `package.json`;
 Format based on [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/) (0.x: the API may still change).
 
 ## [Unreleased]
+### Added
+- 3D preview of a request's toolpath (new window of a quarter of the screen): rotate with the mouse, zoom, move, layer slider, feature colours. Works for plain and binary G-code.
 
 ## [0.12.0] - 2026-11-03
 ### Added

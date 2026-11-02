@@ -284,7 +284,8 @@ function refusedSection() {
 function staffReview(list) {
   if (!list.length) return html`<p class="muted">No requests waiting for review.</p>${refusedSection()}`;
   return html`${list.map((r) => html`<div class="card"><div class="row"><h3 style="margin:0">#${r.id} · ${r.file_name}</h3><span class="muted small">${fmtG(r.grams)} · ${fmtDur(r.seconds)}</span>
-      <span class="right row"><a class="btn sm" href="/api/staff/requests/${r.id}/file">Download G-code</a>
+      <span class="right row"><a class="btn sm" href="/preview.html?id=${r.id}" target="_blank" rel="noopener" data-act="preview" data-id="${r.id}" title="Opens a 3D view of the toolpath in a new window">3D preview</a>
+      <a class="btn sm" href="/api/staff/requests/${r.id}/file">Download G-code</a>
       <button class="sm" data-act="prio" data-id="${r.id}" data-d="1">▲</button><button class="sm" data-act="prio" data-id="${r.id}" data-d="-1">▼</button>
       <button class="sm danger" data-act="reject" data-id="${r.id}">Reject…</button><button class="sm primary" data-act="approve" data-id="${r.id}">Approve</button></span></div>
       ${reqDetail(r)}</div>`)}${refusedSection()}`;
@@ -294,7 +295,8 @@ function staffReady(list) {
   return html`<p class="muted small">Order: priority, then approval time. "Start" uploads the G-code to the printer and begins printing – only press it when the bed is clear and the right filament is loaded.</p>
   ${list.map((r) => html`<div class="card"><div class="row"><h3 style="margin:0">#${r.id} · ${r.user_name}</h3><span>${filLabel(r.filament)}</span>
       <span class="muted small">${r.file_name} · ${fmtG(r.grams)} · ${fmtDur(r.seconds)}</span><span class="pill approved">#${r.queue_position} in line</span>
-      <span class="right row"><button class="sm" data-act="prio" data-id="${r.id}" data-d="1">▲</button><button class="sm" data-act="prio" data-id="${r.id}" data-d="-1">▼</button>
+      <span class="right row"><a class="btn sm" href="/preview.html?id=${r.id}" target="_blank" rel="noopener" data-act="preview" data-id="${r.id}" title="Opens a 3D view of the toolpath in a new window">3D preview</a>
+      <button class="sm" data-act="prio" data-id="${r.id}" data-d="1">▲</button><button class="sm" data-act="prio" data-id="${r.id}" data-d="-1">▼</button>
       <button class="sm danger" data-act="reject" data-id="${r.id}">Reject…</button></span></div>
       ${r.error ? html`<div class="issue error">${r.error}</div>` : ''}
       <div class="row" style="margin-top:10px">${r.eligible.length
@@ -465,6 +467,12 @@ document.addEventListener('click', (e) => {
     cancel: () => act(() => api('POST', `/api/requests/${id}/cancel`, { token: mine()[id] }), 'Request cancelled'),
     logout: async () => { await api('POST', '/api/staff/logout'); me = null; connect(); renderStaff(); },
     tab: () => { tab = b.dataset.t; extra = { rules: null, filaments: null, audit: null }; people.list = null; refresh(); },
+    preview: () => { // a window of a quarter of the screen's area: half its width and half its height, centred
+      const sw = screen.availWidth, sh = screen.availHeight, w = Math.round(sw / 2), h = Math.round(sh / 2);
+      const left = Math.round((screen.availLeft ?? 0) + (sw - w) / 2), top = Math.round((screen.availTop ?? 0) + (sh - h) / 2);
+      const win = window.open(`/preview.html?id=${id}`, `3dpmq-preview-${id}`, `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
+      if (!win) toast('The browser blocked the pop-up window. Please allow pop-ups for this site.'); else win.focus();
+    },
     refclear: async () => {
       const n = state.requests.filter(isRefused).length;
       if (!confirm(`Remove all ${n} refused and cancelled requests from the list? Their G-code files are deleted. Finished prints are not touched.`)) return;

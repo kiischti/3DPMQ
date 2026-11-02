@@ -26,7 +26,7 @@ PrusaSlicer ──export G-code──▶ 3DPMQ (validate · name · filament · 
 - Multi-material off by default; max open requests per person; optional monthly gram quota per person (people are identified by their e-mail address)
 
 **For staff** (shared password)
-- Review queue with all details and the G-code download; approve / reject with reason; priority up/down
+- Review queue with all details, a **3D preview** and the G-code download; approve / reject with reason; priority up/down
 - Printers: add by IP, test connection, set which filament is loaded, "bed is clear" button, pause / resume / stop
 - *Start* uploads the file over PrusaLink and starts printing; or enable **auto-start** per printer (starts the next eligible job only after someone pressed "bed is clear")
 - **Refused and cancelled** requests are listed on the Review tab; remove them one by one or with *Clear all* (their files are deleted, finished prints are never touched)
@@ -81,6 +81,14 @@ Try it without printers: `npm run mock` starts two fake PrusaLink printers on `:
 
 Environment variables: `STAFF_PASSWORD` (required), `PORT`, `DATA_DIR`, `POLL_MS`, `MAX_UPLOAD_MB`, `RETENTION_DAYS` (G-code files of finished jobs are deleted after this), `SESSION_SECRET`.
 
+## 3D preview
+Each request on the Review and Ready tabs has a **3D preview** link. It opens a window of a quarter of your screen's area (half its width and height; allow pop-ups for the site) showing the toolpath of the file.
+- **Rotate:** hold the left mouse button and move. **Zoom:** mouse wheel. **Move:** right button (or Shift + left button). **Double-click:** reset the view. Touch screens: one finger rotates, two fingers zoom and move.
+- **Layer slider** (also the ↑/↓ keys, Shift for 10 layers) shows the print layer by layer; the legend shows or hides feature types (perimeters, infill, supports, …); colour by feature type or by height.
+- The preview shows what the printer will print: the extruded paths, not the original model, because a sliced file does not contain the model. It is computed on the server (a few seconds for big files) and works for plain and binary G-code.
+- Needs a browser with WebGL 2 (any current browser). Files with more than 1.5 million moves show only their first part (a notice says so). Arcs in the radius form (`G2 … R`) are drawn as straight lines; the usual centre form is drawn as arcs.
+- Only staff can open it (it needs the staff login).
+
 ## People and statistics
 Every request is linked to a person. A person is created automatically from the first request (name, e-mail, class) and recognised by e-mail address afterwards (case-insensitive).
 The public form never overwrites an existing person: if someone types a different name or class for a known e-mail, staff see a note on the request and can correct the record on the People tab.
@@ -118,6 +126,7 @@ For the Unraid Docker tab, set the container's *Icon URL* (Advanced View) to
 ## Tests
 - `npm test` — (1) `.bgcode` reader checks on real encoder output in `test/fixtures`, (2) end-to-end with a real server and two mock printers: validation rules, approval, upload, auto-start, limits, access control.
 - `BGCODE_BIN=/path/to/bgcode npx tsx test/bgcode.ts` — full cross-check: encodes the sample with every compression / encoding / checksum combination using Prusa's `bgcode` tool (build it from https://github.com/prusa3d/libbgcode) and compares the decoded commands with the original.
+- `npx tsx test/preview-ui.ts` — opens the 3D viewer in headless Chromium and checks from real canvas pixels that the model is drawn, rotates when dragged, zooms, pans, and reacts to the layer slider and the feature toggles.
 - `npx tsx test/ui.ts` — drives the web UI in headless Chromium and saves screenshots to `test/shots/`.
 
 ## Honest limitations — read before relying on it
@@ -184,6 +193,8 @@ If you re-use the dependency list, re-run a license check after adding packages 
 src/gcode.ts      G-code metadata parser, validation rules
 src/scan.ts       line scanner (temperatures, forbidden commands)
 src/bgcode.ts     binary G-code reader (Heatshrink, MeatPack, Deflate, CRC32)
+src/preview.ts    toolpath extraction for the 3D preview
+public/preview.*  the 3D viewer (WebGL 2, no libraries)
 src/prusalink.ts  PrusaLink v1 client with HTTP Digest auth
 src/server.ts     REST API, queue, scheduler/poller, SSE, staff auth
 src/db.ts         SQLite schema, rules

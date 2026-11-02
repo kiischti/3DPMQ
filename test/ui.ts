@@ -77,6 +77,15 @@ try {
   // staff reviews and starts
   await page.click('a[data-r=staff]'); await page.click('button[data-t=review]');
   await page.waitForSelector('text=Please print slowly');
+  // 3D preview: opens a window of a quarter of the screen's area (half width, half height)
+  const [popup] = await Promise.all([page.waitForEvent('popup'), page.click('a[data-act=preview]')]);
+  await popup.waitForFunction(() => (window as any).__preview, null, { timeout: 30000 });
+  const scr = await page.evaluate(() => ({ sw: screen.availWidth, sh: screen.availHeight })); // the opener's screen is the reference
+  const dims = { ...(await popup.evaluate(() => ({ w: innerWidth, h: innerHeight, url: location.pathname + location.search }))), ...scr };
+  ok(/\/preview\.html\?id=\d+/.test(dims.url), `UI: preview opens in a new window (${dims.url})`);
+  ok(Math.abs(dims.w - dims.sw / 2) <= dims.sw * 0.08 && Math.abs(dims.h - dims.sh / 2) <= dims.sh * 0.12, `UI: preview window is half the screen's width and height (${dims.w}x${dims.h} of ${dims.sw}x${dims.sh})`);
+  await popup.screenshot({ path: `${shots}/preview-popup.png` });
+  await popup.close();
   await page.screenshot({ path: `${shots}/staff-review.png` });
   await page.click('button[data-act=approve]');
   await page.click('button[data-t=ready]');

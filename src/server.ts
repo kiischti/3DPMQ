@@ -12,6 +12,7 @@ import {
 import { PrusaLink, type JobInfo, type PrinterStatus } from './prusalink.js';
 import { SOURCE_URL, VERSION } from './version.js';
 import { peopleRoutes } from './people.js';
+import { buildToolpath, encodePreview } from './preview.js';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const POLL_MS = parseInt(process.env.POLL_MS ?? '5000', 10);
@@ -520,6 +521,32 @@ staff.get('/requests/:id/file', wrap((req, res) => {
   const r = get<Row>('SELECT * FROM requests WHERE id = ?', parseInt(String(req.params.id), 10));
   if (!r || !r.file_path || !fs.existsSync(r.file_path)) throw httpError(404, 'File not available');
   res.download(r.file_path, r.file_name);
+}));
+// 3D preview: the extrusion toolpath of a request's file (cached; building it can take a few seconds for big files)
+const previewCache = new Map<string, Buffer>();
+const previewBuilding = new Map<string, Promise<Buffer>>();
+staff.get('/requests/:id/preview', wrap(async (req, res) => {
+  const r = get<Row>('SELECT * FROM requests WHERE id = ?', parseInt(String(req.params.id), 10));
+  if (!r || !r.file_path || !fs.existsSync(r.file_path)) throw httpError(404, 'File not available');
+  const key = `${r.id}:${fs.statSync(r.file_path).mtimeMs}`;
+  let payload = previewCache.get(key);
+  if (!payload) {
+    let job = previewBuilding.get(key);
+    if (!job) {
+      job = buildToolpath(r.file_path, detectFormat(r.file_name) === 'bgcode').then((tp) => {
+        const meta: GcodeMeta = JSON.parse(r.meta_json);
+        const buf = encodePreview(tp, { id: r.id, file: r.file_name, user: r.user_name, grams: r.grams, seconds: r.seconds, material: r.material, printerModel: meta.printerModel });
+        previewCache.set(key, buf);
+        while (previewCache.size > 4) previewCache.delete(previewCache.keys().next().value as string);
+        return buf;
+      }).finally(() => previewBuilding.delete(key));
+      previewBuilding.set(key, job);
+    }
+    try { payload = await job; } catch (e: any) { throw httpError(422, `The file could not be read for the preview: ${e.message}`); }
+  }
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  res.send(payload);
 }));
 staff.get('/export.csv', (_req, res) => {
   const rows = all<Row>('SELECT r.*, p.name AS printer_name, f.material, f.colour_name FROM requests r LEFT JOIN printers p ON p.id = r.printer_id LEFT JOIN filaments f ON f.id = r.filament_id ORDER BY r.id');

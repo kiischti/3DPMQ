@@ -108,6 +108,16 @@ try {
   ok((await api('POST', `/api/staff/requests/${a.data.id}/approve`)).status === 401, 'approval needs staff');
   cookie = staffCookie;
 
+  // 3D preview data
+  const pvUrl = `${BASE}/api/staff/requests/${a.data.id}/preview`;
+  const pv = await fetch(pvUrl, { headers: { Cookie: staffCookie } });
+  const pvBuf = Buffer.from(await pv.arrayBuffer()), pvHead = pv.ok ? JSON.parse(pvBuf.subarray(4, 4 + pvBuf.readUInt32LE(0)).toString()) : null;
+  ok(pv.ok && pv.headers.get('content-type') === 'application/octet-stream' && pvHead.count > 1000 && pvHead.id === a.data.id && pvBuf.length === 4 + pvBuf.readUInt32LE(0) + pvHead.count * 25, `preview data for request #${a.data.id}: ${pvHead?.count} moves, ${pvHead?.layers.length} layers, ${(pvBuf.length / 1024).toFixed(0)} kB`);
+  ok((await fetch(pvUrl)).status === 401, 'preview needs staff login');
+  ok((await fetch(`${BASE}/api/staff/requests/99999/preview`, { headers: { Cookie: staffCookie } })).status === 404, 'preview of an unknown request is a clean 404');
+  const pv2 = await fetch(pvUrl, { headers: { Cookie: staffCookie } });
+  ok(pv2.ok && Buffer.from(await pv2.arrayBuffer()).equals(pvBuf), 'second request is served from the cache with identical data');
+
   // Alice's request can't start before approval
   ok((await api('POST', `/api/staff/requests/${a.data.id}/start`, { printerId: p1 })).status === 409, 'cannot start unapproved request');
   ok((await api('POST', `/api/staff/requests/${a.data.id}/approve`)).status === 200, 'approve Alice');
