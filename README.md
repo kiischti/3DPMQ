@@ -87,6 +87,35 @@ scanned; such files get a warning. If you want the full scan for everything, tur
 **Not included** (compared with a commercial platform like SimplyPrint): cloud slicing, camera streams / AI failure detection,
 SSO, e-mail notifications (e-mail is only collected), non-Prusa printers (the PrusaLink client in `src/prusalink.ts` is the one place to add other brands), a mobile app, multi-language UI.
 
+## License
+
+3DPMQ is free software, licensed under the **GNU Affero General Public License v3.0 or later** (AGPL-3.0-or-later). See [LICENSE](LICENSE).
+Copyright (C) 2026 Philippe Kirsch.
+
+In short: you may use, study, change and share it, including running it in a makerspace or school, without any extra obligations as long as you run it unmodified or only for your own use.
+If you modify it and let others use your modified version over a network, you must offer those users the source code of your version under the same license (section 13).
+This is a plain-language summary, not legal advice; the license text is what counts.
+
+### Third-party software
+3DPMQ contains no code copied from other projects. It depends on open-source packages, all under permissive licenses that are compatible with the AGPL
+(checked against the installed dependency tree: 135 packages, MIT 109 · Apache-2.0 21 · ISC 4 · BSD-3-Clause 1):
+
+| Used for | Package | License |
+|---|---|---|
+| Web server | Express | MIT |
+| File uploads | Multer (with busboy, streamsearch) | MIT |
+| Language / build | TypeScript | Apache-2.0 |
+| Development runner | tsx | MIT |
+| Database | `node:sqlite`, built into Node.js | MIT (Node.js) |
+
+Optional, for the browser test `test/ui.ts` only (not part of the repo's dependencies, install yourself): Playwright (Apache-2.0) with Chromium (BSD-3-Clause and other open-source licenses).
+The Docker image is based on the official `node:22-alpine` image.
+
+The PrusaLink API and the binary G-code format (libbgcode) were used as documentation only; PrusaLink itself is a separate program that 3DPMQ talks to over the network.
+"3DPMQ" is not affiliated with Prusa Research or SimplyPrint; product names belong to their owners.
+
+If you re-use the dependency list, re-run a license check after adding packages (for example `npx license-checker --summary`).
+
 ## Layout
 ```
 src/gcode.ts      G-code / bgcode metadata parser, command scanner, validation rules
