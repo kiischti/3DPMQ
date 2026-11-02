@@ -86,6 +86,7 @@ Numbers follow `MAJOR.MINOR.PATCH` (`0.11.0` = "version 0.11"): bump the minor n
 To publish a new version:
 1. Add the changes under `## [Unreleased]` in `CHANGELOG.md` while you work. When releasing, rename that heading to the new version and date and add a fresh empty `[Unreleased]` above it.
 2. Commit, then run `npm version minor` (or `patch`). This updates `package.json` and `package-lock.json`, commits, and creates the git tag `v0.12.0`. (`npm version 0.12.0` sets an exact number.)
+   Without npm (for example on a PC without Node.js): change `version` in `package.json` and in the two places at the top of `package-lock.json`, commit, then run `git tag -a v0.12.0 -m "Version 0.12.0"`.
 3. `git push --follow-tags`. GitHub Actions then builds the image and publishes it as `ghcr.io/<github-user>/3dpmq:0.12.0` **and** `:latest`.
 
 On Unraid you can pin the exact version (`...:0.12.0`) in the container's *Repository* field instead of `:latest`, so updates only happen when you change it.

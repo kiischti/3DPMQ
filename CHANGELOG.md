@@ -4,6 +4,8 @@ All notable changes are listed here. The version number lives in `package.json`;
 Format based on [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/) (0.x: the API may still change).
 
 ## [Unreleased]
+
+## [0.11.1] - 2026-11-02
 ### Added
 - Logo and icons: header logo, favicon (SVG + ICO), Apple touch icon, web app manifest, 512 px icon for Unraid / README, image labels in the Dockerfile.
 
@@ -19,5 +21,6 @@ First tagged version.
 ### Known limitations
 - Not yet tested on real printers or on a real PrusaSlicer export (see README).
 
-[Unreleased]: https://github.com/kiischti/3DPMQ/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/kiischti/3DPMQ/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/kiischti/3DPMQ/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/kiischti/3DPMQ/releases/tag/v0.11.0
