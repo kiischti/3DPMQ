@@ -4,6 +4,8 @@ All notable changes are listed here. The version number lives in `package.json`;
 Format based on [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/) (0.x: the API may still change).
 
 ## [Unreleased]
+
+## [0.15.0] - 2026-11-03
 ### Added
 - **Languages:** English (default), French and German, selectable on the page itself (selector in the header, remembered per browser). Covers the submit form, queue, printers, the whole staff area, the 3D viewer window, validation issues and error messages. Dates and numbers follow the language. New `npm test` check keeps the language files complete and consistent.
 - API errors and validation issues now carry a stable `code` and `params` next to the English `error` / `message` text.
