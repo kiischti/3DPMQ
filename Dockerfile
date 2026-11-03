@@ -9,6 +9,9 @@ FROM node:22-alpine
 LABEL org.opencontainers.image.title="3DPMQ" \
       org.opencontainers.image.description="3D Printer Makerspace Queue: validation, approval and queue for Prusa printers (PrusaLink)" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later"
+# Unraid reads these labels from the container: the logo next to the name in the Docker tab and the WebUI link
+LABEL net.unraid.docker.icon="https://raw.githubusercontent.com/kiischti/3DPMQ/main/public/icon-512.png" \
+      net.unraid.docker.webui="http://[IP]:[PORT:3000]/"
 WORKDIR /app
 ENV NODE_ENV=production DATA_DIR=/data PORT=3000
 COPY package*.json ./

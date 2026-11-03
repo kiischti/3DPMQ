@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DATA_DIR, EMAIL_RE, ROLES, UPLOAD_DIR, audit, db, getRules, getSecret, normEmail, setRules, type Rules } from './db.js';
+import { DATA_DIR, EMAIL_RE, ROLES, UPLOAD_DIR, audit, classList, cleanClass, db, ensureClass, getRules, getSecret, normEmail, setRules, type Rules } from './db.js';
 import {
   detectFormat, hasErrors, modelEquals, parseMeta, scanFile, validate,
   type FilamentLite, type GcodeMeta, type Issue, type PrinterLite, type ScanResult,
@@ -341,7 +341,7 @@ app.get('/api/config', (_req, res) => {
     version: VERSION, source_url: SOURCE_URL || null,
     rules: { ...rules },
     filaments: all('SELECT * FROM filaments WHERE in_stock = 1 ORDER BY material, colour_name'),
-    classes: all<{ class: string }>("SELECT DISTINCT class FROM users WHERE class != '' ORDER BY class COLLATE NOCASE").map((r) => r.class),
+    classes: classList(),
     printer_models: [...new Set(allPrinters().filter((p) => p.enabled).map((p) => p.model).filter(Boolean))],
   });
 });
@@ -375,7 +375,7 @@ app.post('/api/requests', upload.single('file'), wrap(async (req, res) => {
     const rules = getRules();
     const typedName = String(req.body.name ?? '').trim().slice(0, 80);
     const email = normEmail(req.body.email).slice(0, 120);
-    const typedClass = String(req.body.class ?? '').trim().slice(0, 40);
+    const typedClass = cleanClass(req.body.class);
     const notes = String(req.body.notes ?? '').trim().slice(0, 1000);
     const fid = parseInt(req.body.filamentId, 10);
     const existing = EMAIL_RE.test(email) ? get<Row>('SELECT * FROM users WHERE email = ?', email) : undefined;
@@ -410,11 +410,17 @@ app.post('/api/requests', upload.single('file'), wrap(async (req, res) => {
     let userId: number, userName: string, userClass: string;
     if (existing) {
       userId = existing.id; userName = existing.name; userClass = existing.class;
+      if (!existing.class && typedClass) { // a known person without a class (older records): the blank is filled, an existing class is never overwritten here
+        userClass = ensureClass(typedClass);
+        run('UPDATE users SET class = ?, updated_at = strftime(\'%Y-%m-%dT%H:%M:%fZ\',\'now\') WHERE id = ?', userClass, existing.id);
+        run('UPDATE requests SET user_class = ? WHERE user_id = ?', userClass, existing.id);
+      }
       if (typedName.toLowerCase() !== existing.name.toLowerCase()) staffInfo.push({ level: 'info', code: 'name-differs', message: `Typed name "${typedName}" differs from the registered name "${existing.name}" for this e-mail.` });
-      if (typedClass && typedClass.toLowerCase() !== existing.class.toLowerCase()) staffInfo.push({ level: 'info', code: 'class-differs', message: `Typed class "${typedClass}" differs from the registered class "${existing.class || '(none)'}".` });
+      if (typedClass && existing.class && typedClass.toLowerCase() !== existing.class.toLowerCase()) staffInfo.push({ level: 'info', code: 'class-differs', message: `Typed class "${typedClass}" differs from the registered class "${existing.class || '(none)'}".` });
     } else {
-      userId = Number(run('INSERT INTO users(name, email, class) VALUES (?,?,?)', typedName, email, typedClass).lastInsertRowid);
-      userName = typedName; userClass = typedClass;
+      userClass = ensureClass(typedClass); // a class that is new becomes an entry of the classes table
+      userId = Number(run('INSERT INTO users(name, email, class) VALUES (?,?,?)', typedName, email, userClass).lastInsertRowid);
+      userName = typedName;
       audit(typedName, 'user-created', undefined, email);
     }
     const material = (meta.filamentTypes.length ? meta.filamentTypes : [filamentRow(fid)?.material ?? '']).map((t) => t.toUpperCase()).join('/');

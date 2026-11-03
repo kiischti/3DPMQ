@@ -36,6 +36,12 @@ CREATE TABLE IF NOT EXISTS printers (
   loaded_filament_id INTEGER REFERENCES filaments(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS classes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE COLLATE NOCASE,   -- "2CE" and "2ce" are the same class
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -181,10 +187,43 @@ if (!db.prepare('SELECT 1 FROM settings WHERE key = ?').get('migrated_users_v1')
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
+// classes used so far become entries of the classes table (once); spelling is unified to the first one found
+if (!db.prepare('SELECT 1 FROM settings WHERE key = ?').get('migrated_classes_v1')) {
+  db.exec('BEGIN');
+  try {
+    for (const r of db.prepare("SELECT DISTINCT class AS raw FROM users WHERE trim(class) != '' ORDER BY (SELECT MIN(id) FROM users u2 WHERE u2.class = users.class)").all() as { raw: string }[]) {
+      const clean = r.raw.replace(/\s+/g, ' ').trim();
+      db.prepare('INSERT OR IGNORE INTO classes(name) VALUES (?)').run(clean);
+      const canon = (db.prepare('SELECT name FROM classes WHERE name = ?').get(clean) as { name: string }).name;
+      db.prepare('UPDATE users SET class = ? WHERE class = ?').run(canon, r.raw);
+    }
+    db.exec("UPDATE requests SET user_class = (SELECT class FROM users WHERE users.id = requests.user_id) WHERE user_id IS NOT NULL AND user_class != ''");
+    db.prepare('INSERT INTO settings(key,value) VALUES (?,?)').run('migrated_classes_v1', new Date().toISOString());
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
 // ---------- people helpers
 export const normEmail = (s: unknown) => String(s ?? '').trim().toLowerCase();
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 export const ROLES = ['student', 'staff', 'other'] as const;
+
+export const cleanClass = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+
+/** Returns the stored spelling of a class, creating the entry if it is new ("2ce" finds "2CE"). '' for no class. */
+export function ensureClass(raw: unknown): string {
+  const name = cleanClass(raw);
+  if (!name) return '';
+  const row = db.prepare('SELECT name FROM classes WHERE name = ?').get(name) as { name: string } | undefined;
+  if (row) return row.name;
+  db.prepare('INSERT INTO classes(name) VALUES (?)').run(name);
+  audit('system', 'class-created', undefined, name);
+  return name;
+}
+
+const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+export const sortClasses = <T>(rows: T[], key: (r: T) => string) => rows.sort((a, b) => collator.compare(key(a), key(b)));
+export const classList = (): string[] => sortClasses((db.prepare('SELECT name FROM classes').all() as { name: string }[]).map((r) => r.name), (n) => n);
 
 // seed a few filaments on first run so the form is usable immediately
 if ((db.prepare('SELECT COUNT(*) AS n FROM filaments').get() as { n: number }).n === 0) {

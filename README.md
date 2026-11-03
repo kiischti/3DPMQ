@@ -95,13 +95,17 @@ The public form never overwrites an existing person: if someone types a differen
 Staff and other users are people too, with the same fields, statistics and edit/remove options; set the *role* to Staff or Other (the class is then not required).
 Corrections to a person also update the name, e-mail and class shown on their requests.
 
+**Classes** are entries in the database. On the request form and in the person editor the class field is a dropdown: the arrow lists all existing classes, typing filters them, and a name that does not exist yet is offered as "New class: …" and **created automatically** when the request (or person) is saved.
+"2ce" finds the existing "2CE" (no duplicates by capitalisation), extra spaces are tidied, and the list is sorted naturally (2CE before 10CE). On the People tab staff can add, rename (fixes everybody in that class) and delete classes (only empty ones).
+A new class is only created for a new person or by staff; a known person's class is never changed from the public form, except that a blank class (older records) is filled in once.
+
 **Statistics** (per person, per material, per month; overall and per class on the People tab and in the CSV): the number of completed prints, the weight of plastic and the print time.
 A finished print counts in full; a print that was stopped or failed part-way counts by the share that was printed (last progress reported by the printer). Weights are the slicer's estimate; print time is the time the printer reported (or the elapsed time if it reported none).
 
 **Removing a person** is only possible when they have no open requests. *Remove person* erases name, e-mail, class and notes everywhere (requests, audit log, uploaded files) and keeps the prints as anonymous statistics; *Remove incl. all requests* also deletes their requests and the statistics.
 Only staff can see e-mail addresses and classes; the public queue shows names only.
 
-**Upgrading from an older version:** the database is migrated automatically on start. Existing requests are grouped into people by e-mail (or by name when there was none). People without an e-mail or class are marked with a warning on the People tab so staff can complete them.
+**Upgrading from an older version:** the database is migrated automatically on start. Existing requests are grouped into people by e-mail (or by name when there was none), and the classes already in use become class entries. People without an e-mail or class are marked with a warning on the People tab so staff can complete them.
 
 ## Releases and versions
 The version lives in one place, `package.json`, and is shown in the page footer, the server log and `/api/config`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -120,11 +124,12 @@ Optional: set `SOURCE_URL` (environment variable) to your repository address to 
 ### Logo and icons
 `public/logo.svg` (mark, transparent) and `public/favicon.svg` (app icon with background) are the sources; `icon-512.png`, `icon-192.png`, `apple-touch-icon.png` and `favicon.ico` are exported from them.
 The logo is an original design (a block of printed layers, top layer with infill lines) released under the same license as the code.
-For the Unraid Docker tab, set the container's *Icon URL* (Advanced View) to
-`https://raw.githubusercontent.com/<github-user>/3DPMQ/main/public/icon-512.png`; this works once the repository is public.
+For the Unraid Docker tab the image carries the labels `net.unraid.docker.icon` (this icon) and `net.unraid.docker.webui`, so a container created from a recent image shows the logo and the WebUI link by itself (labels are read when the container is created: update the image and recreate the container).
+If the logo is missing, set the container's *Icon URL* (Advanced View) to `https://raw.githubusercontent.com/<github-user>/3DPMQ/main/public/icon-512.png` (the repository must be public; open the address in a browser to check) and press Apply.
+Unraid keeps a copy of the icon it downloaded; if a failed download is stuck, delete `/var/local/emhttp/plugins/dynamix.docker.manager/images/<container name>-icon.png` in the Unraid terminal and reload the Docker tab (Ctrl+F5).
 
 ## Tests
-- `npm test` — (1) `.bgcode` reader checks on real encoder output in `test/fixtures`, (2) end-to-end with a real server and two mock printers: validation rules, approval, upload, auto-start, limits, access control.
+- `npm test` — (0) version consistency, (1) `.bgcode` reader checks on real encoder output in `test/fixtures`, (2) end-to-end with a real server and two mock printers: validation rules, approval, upload, auto-start, limits, access control.
 - `BGCODE_BIN=/path/to/bgcode npx tsx test/bgcode.ts` — full cross-check: encodes the sample with every compression / encoding / checksum combination using Prusa's `bgcode` tool (build it from https://github.com/prusa3d/libbgcode) and compares the decoded commands with the original.
 - `npx tsx test/preview-ui.ts` — opens the 3D viewer in headless Chromium and checks from real canvas pixels that the model is drawn, rotates when dragged, zooms, pans, and reacts to the layer slider and the feature toggles.
 - `npx tsx test/ui.ts` — drives the web UI in headless Chromium and saves screenshots to `test/shots/`.

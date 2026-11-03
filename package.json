@@ -10,7 +10,7 @@
     "start": "node --disable-warning=ExperimentalWarning dist/server.js",
     "typecheck": "tsc --noEmit",
     "mock": "tsx mock/mock-prusalink.ts",
-    "test": "node test/version.mjs && tsx test/bgcode.ts && tsx test/preview.ts && tsx test/run.ts"
+    "test": "node test/version.mjs && tsx test/bgcode.ts && tsx test/preview.ts && tsx test/classes-migration.ts && tsx test/run.ts"
   },
   "keywords": [],
   "author": "",

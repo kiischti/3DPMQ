@@ -246,6 +246,51 @@ try {
   ok((await api('DELETE', `/api/staff/users/${frank.id}?mode=purge`)).status === 200 && !(await api('GET', '/api/state')).data.requests.some((x: any) => x.user_email === emailOf('Frank')), 'purge also deletes their requests');
   ok(!(await api('GET', '/api/staff/audit')).data.some((x: any) => JSON.stringify(x).includes(emailOf('Erin'))), 'audit log no longer contains the removed person\'s e-mail');
 
+  // classes are database entries, created when a new class is typed
+  const classesNow = async () => ((await api('GET', '/api/config')).data.classes as string[]);
+  const before0 = await classesNow();
+  ok(!before0.includes('Z9') && before0.includes('2CE'), `classes so far: ${before0.join(', ')}`);
+  cookie = '';
+  const bad1 = await subx('good.gcode', { name: 'Nobody', email: 'invalid', class: 'Nope' });
+  ok(bad1.status === 422 && !(await classesNow()).includes('Nope'), 'a refused submission creates no class');
+  ok((await subx('good.gcode', { name: 'Cleo Test', email: 'cleo@example.org', class: 'Z9' })).status === 201 && (await classesNow()).includes('Z9'), 'a new class typed on the request form is created');
+  ok((await subx('good.gcode', { name: 'Dan Test', email: 'dan@example.org', class: 'z9' })).status === 201 && (await classesNow()).filter((c) => /^z9$/i.test(c)).length === 1, 'same class in another spelling does not create a second entry');
+  ok((await subx('good.gcode', { name: 'Eli Test', email: 'eli@example.org', class: '  10  CE ' })).status === 201 && (await classesNow()).includes('10 CE'), 'spaces are tidied up ("  10  CE " → "10 CE")');
+  await subx('good.gcode', { name: 'Ada Test', email: 'ada@example.org', class: '2ce' });
+  const order = await classesNow();
+  ok(order.indexOf('2CE') < order.indexOf('10 CE') && order.filter((c) => c.toLowerCase() === '2ce').length === 1, `the list is sorted naturally: ${order.join(', ')}`);
+  cookie = staffCookie;
+  const ppl = (await api('GET', '/api/staff/users')).data as any[];
+  ok(ppl.find((u) => u.email === 'dan@example.org').class === 'Z9' && ppl.find((u) => u.email === 'ada@example.org').class === '2CE', 'people keep the stored spelling of the class');
+  // a known person without a class (older record): the blank is filled once, afterwards never overwritten from the public form
+  const leg = await api('POST', '/api/staff/users', { name: 'Legacy Person', email: 'legacy@example.org', class: '', role: 'student' });
+  cookie = '';
+  ok((await subx('good.gcode', { name: 'Legacy Person', email: 'legacy@example.org', class: 'Q1' })).status === 201, 'known person without class can submit');
+  await subx('good.gcode', { name: 'Legacy Person', email: 'legacy@example.org', class: 'Q2' });
+  cookie = staffCookie;
+  const lp = ((await api('GET', '/api/staff/users')).data as any[]).find((u) => u.id === leg.data.id);
+  ok(lp.class === 'Q1' && (await classesNow()).includes('Q1') && !(await classesNow()).includes('Q2'), 'blank class filled from the form; a later different class is not applied and creates no entry');
+  ok((await api('POST', '/api/staff/users', { name: 'Staff Class', email: 'sc@example.org', class: 'S7', role: 'staff' })).status === 201 && (await classesNow()).includes('S7'), 'a new class typed by staff in the person editor is created too');
+  ok((await api('POST', '/api/staff/users', { name: 'Bad', email: 'not-valid', class: 'NeverMade' })).status === 400 && !(await classesNow()).includes('NeverMade'), 'a refused person edit creates no class');
+
+  // managing classes
+  cookie = ''; ok((await api('GET', '/api/staff/classes')).status === 401, 'class list needs staff login'); cookie = staffCookie;
+  const cls = (await api('GET', '/api/staff/classes')).data as any[];
+  const z9 = cls.find((c) => c.name === 'Z9');
+  ok(z9.people === 2 && cls.some((c) => c.name === 'S7' && c.people === 1), `class list with people counts (Z9: ${z9.people})`);
+  const added = await api('POST', '/api/staff/classes', { name: '  Empty1 ' });
+  ok(added.status === 201 && (await classesNow()).includes('Empty1'), 'staff can add a class');
+  ok((await api('POST', '/api/staff/classes', { name: 'EMPTY1' })).status === 409, 'adding an existing class is refused (case-insensitive)');
+  const empty1 = ((await api('GET', '/api/staff/classes')).data as any[]).find((c) => c.name === 'Empty1');
+  ok((await api('PUT', `/api/staff/classes/${empty1.id}`, { name: 'z9' })).status === 409, 'rename to a name that is taken is refused');
+  ok((await api('PUT', `/api/staff/classes/${z9.id}`, { name: 'Z9x' })).status === 200, 'rename a class');
+  const renamed = ((await api('GET', '/api/staff/users')).data as any[]).filter((u) => u.class === 'Z9x').length;
+  const dReq = (await api('GET', '/api/state')).data.requests.find((x: any) => x.user_email === 'dan@example.org');
+  ok(renamed === 2 && dReq.user_class === 'Z9x' && !(await classesNow()).includes('Z9'), 'renaming moves the people and their requests to the new name');
+  ok((await api('DELETE', `/api/staff/classes/${z9.id}`)).status === 409, 'a class with people cannot be deleted');
+  ok((await api('DELETE', `/api/staff/classes/${empty1.id}`)).status === 200 && !(await classesNow()).includes('Empty1'), 'an empty class can be deleted');
+  ok((await api('DELETE', `/api/staff/classes/${empty1.id}`)).status === 404, 'deleting it again is a clean 404');
+
   // clearing refused requests
   const before = (await api('GET', '/api/state')).data.requests;
   const refused = before.filter((x: any) => x.status === 'rejected' || (x.status === 'cancelled' && !x.started_at)).length;

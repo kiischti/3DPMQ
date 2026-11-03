@@ -6,6 +6,49 @@ const raw = (s) => ({ __raw: String(s) });
 const val = (v) => (v && v.__raw !== undefined ? v.__raw : Array.isArray(v) ? v.map(val).join('') : v === false || v == null ? '' : esc(v));
 const html = (s, ...v) => raw(s.reduce((a, x, i) => a + x + (i < v.length ? val(v[i]) : ''), ''));
 const root = $('#root');
+// ---------------------------------------------------------------- class combobox: one text field + a dropdown with all classes
+// A class that is typed and does not exist yet is created when the form is saved.
+function comboInit(input) {
+  if (!input || input.dataset.comboReady) return;
+  input.dataset.comboReady = '1';
+  loadConfig().catch(() => {}); // pick up classes created since the page was loaded
+  const wrap = document.createElement('div'); wrap.className = 'combo';
+  input.parentNode.insertBefore(wrap, input); wrap.appendChild(input);
+  const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'combo-arrow'; btn.tabIndex = -1; btn.setAttribute('aria-label', 'Show all classes'); btn.textContent = '▾';
+  const list = document.createElement('ul'); list.className = 'combo-list'; list.setAttribute('role', 'listbox'); list.hidden = true; list.id = `combo-${Math.random().toString(36).slice(2, 8)}`;
+  wrap.append(btn, list);
+  input.setAttribute('role', 'combobox'); input.setAttribute('aria-autocomplete', 'list'); input.setAttribute('aria-expanded', 'false'); input.setAttribute('aria-controls', list.id);
+  let items = [], active = -1;
+  const known = () => (config?.classes || []);
+  const close = () => { list.hidden = true; input.setAttribute('aria-expanded', 'false'); active = -1; };
+  const choose = (v) => { input.value = v; close(); input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); };
+  const mark = () => items.forEach((li, i) => { li.classList.toggle('on', i === active); li.setAttribute('aria-selected', i === active ? 'true' : 'false'); if (i === active) li.scrollIntoView({ block: 'nearest' }); });
+  function open(showAll) {
+    const typed = input.value.replace(/\s+/g, ' ').trim(), q = typed.toLowerCase();
+    const opts = showAll || !q ? known() : known().filter((c) => c.toLowerCase().includes(q));
+    const exists = known().some((c) => c.toLowerCase() === q);
+    list.innerHTML = '';
+    if (typed && !exists) { const li = document.createElement('li'); li.className = 'new'; li.setAttribute('role', 'option'); li.dataset.v = typed; li.textContent = `New class: “${typed}”`; list.appendChild(li); }
+    for (const c of opts) { const li = document.createElement('li'); li.setAttribute('role', 'option'); li.dataset.v = c; li.textContent = c; if (c.toLowerCase() === q) li.classList.add('cur'); list.appendChild(li); }
+    if (!list.children.length) { const li = document.createElement('li'); li.className = 'empty'; li.textContent = 'No classes yet. Type a name to create the first one.'; list.appendChild(li); }
+    items = [...list.querySelectorAll('li[data-v]')]; active = -1; mark();
+    list.hidden = false; input.setAttribute('aria-expanded', 'true');
+  }
+  btn.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the field
+  btn.addEventListener('click', () => { if (list.hidden) { input.focus(); open(true); } else close(); });
+  list.addEventListener('mousedown', (e) => { const li = e.target.closest('li[data-v]'); if (li) { e.preventDefault(); choose(li.dataset.v); } });
+  input.addEventListener('input', () => open(false));
+  input.addEventListener('focus', () => { if (!input.value) open(true); });
+  input.addEventListener('blur', () => setTimeout(close, 120));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (list.hidden) open(true); else { active = Math.min(items.length - 1, active + 1); mark(); } }
+    else if (e.key === 'ArrowUp' && !list.hidden) { e.preventDefault(); active = Math.max(0, active - 1); mark(); }
+    else if (e.key === 'Enter' && !list.hidden && active >= 0) { e.preventDefault(); choose(items[active].dataset.v); }
+    else if (e.key === 'Escape' && !list.hidden) { e.preventDefault(); e.stopPropagation(); close(); }
+  });
+}
+
+
 let formDirty = false; // true while a staff form has unsaved edits: live updates must not redraw (and wipe) it
 const mount = (el, tpl) => { el.innerHTML = tpl.__raw; formDirty = false; };
 document.addEventListener('input', (e) => { if (e.target.closest?.('form[data-form]') || e.target.dataset?.fil !== undefined) formDirty = true; });
@@ -126,8 +169,7 @@ function renderSubmit() {
         <div><label for="email">E-mail *</label><input id="email" name="email" type="email" required maxlength="120" value="${email}" autocomplete="email"></div>
       </div>
       <div class="cols2">
-        <div><label for="class">Class ${r.requireClass ? '(students: required)' : '(optional)'}</label><input id="class" name="class" list="classlist" maxlength="40" value="${cls}" placeholder="e.g. 2CE">
-          <datalist id="classlist">${(config.classes || []).map((c) => html`<option value="${c}">`)}</datalist></div>
+        <div><label for="class">Class ${r.requireClass ? '(students: required)' : '(optional)'}</label><input id="class" name="class" maxlength="40" value="${cls}" placeholder="choose or type a new one" autocomplete="off"></div>
         <div></div>
       </div>
       <label for="filament">Filament *</label>
@@ -137,6 +179,7 @@ function renderSubmit() {
       <div class="row" style="margin-top:14px"><button class="primary" id="send" disabled>Send request</button><span class="muted small" id="hint">Choose a file first.</span></div>
     </form>`);
   fillFilaments();
+  comboInit($('#class'));
   const drop = $('#drop'), file = $('#file');
   drop.onclick = () => file.click();
   drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
@@ -181,7 +224,7 @@ async function send(e) {
   $('#send').disabled = true;
   try {
     const r = await api('POST', '/api/requests', fd);
-    remember(r.id, r.cancel_token);
+    remember(r.id, r.cancel_token); loadConfig().catch(() => {});
     toast(`Request #${r.id} sent. Staff will review it.`);
     location.hash = '#/queue';
   } catch (err) {
@@ -360,15 +403,15 @@ function staffLog() {
 
 
 // ---------------------------------------------------------------- people tab
-const people = { list: null, stats: null, q: '', role: '', cls: '', sel: null, detail: null };
+const people = { list: null, stats: null, classes: [], classesOpen: false, q: '', role: '', cls: '', sel: null, detail: null, gen: 0 };
 const fmtMass = (g) => (g == null ? '–' : g >= 1000 ? `${(g / 1000).toFixed(2)} kg` : g >= 10 ? `${Math.round(g)} g` : `${(Math.round(g * 10) / 10)} g`);
 const ROLE_LABEL = { student: 'Student', staff: 'Staff', other: 'Other' };
 
 async function loadPeople() {
   const qs = new URLSearchParams();
   if (people.q) qs.set('q', people.q); if (people.role) qs.set('role', people.role); if (people.cls) qs.set('class', people.cls);
-  const [list, stats] = await Promise.all([api('GET', '/api/staff/users?' + qs), api('GET', '/api/staff/stats')]);
-  people.list = list; people.stats = stats;
+  const [list, stats, classes] = await Promise.all([api('GET', '/api/staff/users?' + qs), api('GET', '/api/staff/stats'), api('GET', '/api/staff/classes')]);
+  people.list = list; people.stats = stats; people.classes = classes;
 }
 function peopleTable() {
   const l = people.list;
@@ -383,7 +426,7 @@ function peopleTable() {
       <td><button class="sm" data-act="pedit" data-id="${u.id}">Edit</button></td></tr>`)}</tbody></table></div>`;
 }
 function staffPeople() {
-  const s = people.stats, classes = s.by_class.map((c) => c.class);
+  const s = people.stats, classes = [...people.classes.map((c) => c.name), ...(s.by_class.some((c) => c.class === '(none)') ? ['(none)'] : [])];
   const mats = s.by_material.map((m) => `${m.material} ${fmtMass(m.grams)}`).join(' · ') || '–';
   const maxG = Math.max(1, ...s.by_month.map((m) => m.grams));
   return html`
@@ -400,6 +443,14 @@ function staffPeople() {
         ${s.by_month.map((m) => html`<tr><td>${m.month}</td><td>${m.material}</td><td>${m.prints}</td><td>${fmtMass(m.grams)}</td><td style="width:90px"><div class="bar"><i style="width:${(m.grams / maxG) * 100}%"></i></div></td></tr>`)}</tbody></table></div></div>
       <p class="small muted" style="margin-bottom:0">Statistics count finished prints in full and prints that were stopped part-way by the share that was printed. Weights are the slicer's estimate.</p>
     </details>
+    <details class="card" id="p-classes" ${people.classesOpen ? 'open' : ''}><summary>Classes (${people.classes.length})</summary>
+      <p class="muted small">Classes appear here automatically when a new one is typed on the request form or in the person editor. Rename fixes typos for everybody in the class; a class can only be deleted when nobody is in it.</p>
+      ${people.classes.length ? html`<table style="max-width:560px"><thead><tr><th>Class</th><th>People</th><th></th></tr></thead><tbody>
+        ${people.classes.map((c) => html`<tr><td><b>${c.name}</b></td><td>${c.people}</td><td class="row" style="gap:6px">
+          <button class="sm" data-act="cren" data-id="${c.id}" data-name="${c.name}">Rename</button>
+          <button class="sm danger" data-act="cdel" data-id="${c.id}" data-name="${c.name}" ${c.people ? 'disabled title="Move the people to another class first"' : ''}>Delete</button></td></tr>`)}</tbody></table>` : html`<p class="muted">No classes yet.</p>`}
+      <form data-form="class" class="row" style="margin-top:10px"><input name="name" placeholder="New class, e.g. 2CE" maxlength="40" required style="max-width:240px"><button class="sm primary">Add class</button></form>
+    </details>
     <div class="row" style="margin-bottom:12px">
       <input id="p-q" placeholder="Search name, e-mail or class" value="${people.q}" style="flex:1;min-width:200px">
       <select id="p-role" style="width:auto"><option value="">All roles</option>${['student', 'staff', 'other'].map((r) => html`<option value="${r}" ${people.role === r ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`)}</select>
@@ -414,7 +465,7 @@ function personForm(u) {
   return html`<form data-form="person" data-id="${u ? u.id : ''}"><div class="cols2">
       <div><label>Name</label><input name="name" required minlength="2" maxlength="80" value="${v.name}"></div>
       <div><label>E-mail</label><input name="email" type="email" required maxlength="120" value="${v.email}"></div>
-      <div><label>Class</label><input name="class" list="classlist2" maxlength="40" value="${v.class}"><datalist id="classlist2">${(people.stats?.by_class || []).filter((c) => c.class !== '(none)').map((c) => html`<option value="${c.class}">`)}</datalist></div>
+      <div><label>Class</label><input name="class" maxlength="40" value="${v.class}" placeholder="choose or type a new one" autocomplete="off" data-combo></div>
       <div><label>Role</label><select name="role">${['student', 'staff', 'other'].map((r) => html`<option value="${r}" ${v.role === r ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`)}</select></div></div>
     <label>Notes (only visible to staff)</label><textarea name="notes" maxlength="1000">${v.notes}</textarea>
     <div class="row" style="margin-top:12px"><button class="primary">${u ? 'Save changes' : 'Add person'}</button><button type="button" data-act="pclose">Close</button>
@@ -439,16 +490,21 @@ function personPanel() {
           <td class="small">${r.printed_grams || r.printed_seconds ? `${fmtMass(r.printed_grams)} · ${r.printed_seconds ? fmtDur(r.printed_seconds) : '–'}` : '–'}</td></tr>`)}</tbody></table></div>` : html`<p class="muted">No requests.</p>`}
     </div>`;
 }
-function drawPersonPanel() { const el = $('#p-detail'); if (el) el.innerHTML = personPanel().__raw ?? ''; }
+function drawPersonPanel() { const el = $('#p-detail'); if (el) { el.innerHTML = personPanel().__raw ?? ''; el.querySelectorAll('input[data-combo]').forEach((i) => comboInit(i)); } }
 function drawPeopleTable() { const el = $('#p-table'); if (el) el.innerHTML = peopleTable().__raw; }
 async function openPerson(id) {
+  if (people.sel === id && people.detail && !people.detail.adding) { $('#p-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); return; } // already open and up to date: do not redraw it under the user's hands
+  people.gen++; // whatever was reloading in the background must not redraw over this
   people.sel = id; people.detail = await api('GET', `/api/staff/users/${id}`);
   drawPersonPanel(); drawPeopleTable();
   $('#p-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 async function reloadPeople(keepOpen = true) {
+  const gen = ++people.gen;
   await loadPeople();
   if (keepOpen && people.sel) { try { people.detail = await api('GET', `/api/staff/users/${people.sel}`); } catch { people.sel = null; people.detail = null; } }
+  if (gen !== people.gen) return;               // the user opened or closed something meanwhile: this result is out of date
+  if (formDirty) { drawPeopleTable(); return; } // an edit is in progress: never redraw the form under the user's hands
   await renderStaff();
 }
 let pTimer;
@@ -466,7 +522,7 @@ document.addEventListener('click', (e) => {
   const handlers = {
     cancel: () => act(() => api('POST', `/api/requests/${id}/cancel`, { token: mine()[id] }), 'Request cancelled'),
     logout: async () => { await api('POST', '/api/staff/logout'); me = null; connect(); renderStaff(); },
-    tab: () => { tab = b.dataset.t; extra = { rules: null, filaments: null, audit: null }; people.list = null; refresh(); },
+    tab: () => { tab = b.dataset.t; extra = { rules: null, filaments: null, audit: null }; people.list = null; people.sel = null; people.detail = null; refresh(); },
     preview: () => { // a window of a quarter of the screen's area: half its width and half its height, centred
       const sw = screen.availWidth, sh = screen.availHeight, w = Math.round(sw / 2), h = Math.round(sh / 2);
       const left = Math.round((screen.availLeft ?? 0) + (sw - w) / 2), top = Math.round((screen.availTop ?? 0) + (sh - h) / 2);
@@ -480,9 +536,17 @@ document.addEventListener('click', (e) => {
       if (r) toast(`Removed ${r.removed} request(s)`);
     },
     refdel: () => act(() => api('DELETE', `/api/staff/requests/${id}`), `#${id} removed`),
-    pnew: () => { people.sel = null; people.detail = { adding: true }; drawPersonPanel(); drawPeopleTable(); $('#p-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); },
+    cren: async () => {
+      const name = prompt(`New name for class ${b.dataset.name}:`, b.dataset.name);
+      if (name && name.trim() && name.trim() !== b.dataset.name) { const r = await act(() => api('PUT', `/api/staff/classes/${id}`, { name }), 'Class renamed'); if (r) { await loadConfig(); await reloadPeople(true); } }
+    },
+    cdel: async () => {
+      if (!confirm(`Delete the class ${b.dataset.name}?`)) return;
+      const r = await act(() => api('DELETE', `/api/staff/classes/${id}`), 'Class deleted'); if (r) { await loadConfig(); await reloadPeople(true); }
+    },
+    pnew: () => { people.gen++; people.sel = null; people.detail = { adding: true }; drawPersonPanel(); drawPeopleTable(); $('#p-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); },
     pedit: () => act(() => openPerson(+id)),
-    pclose: () => { people.sel = null; people.detail = null; drawPersonPanel(); drawPeopleTable(); },
+    pclose: () => { people.gen++; people.sel = null; people.detail = null; drawPersonPanel(); drawPeopleTable(); },
     udel: async () => {
       const mode = b.dataset.mode, name = people.detail?.user?.name ?? 'this person';
       const msg = mode === 'purge'
@@ -526,16 +590,22 @@ document.addEventListener('change', (e) => {
   if (s.id === 'filament' || s.id === 'name') { if (typeof updateSend === 'function' && $('#send')) updateSend(); }
 });
 document.addEventListener('toggle', (e) => {
-  const d = e.target; if (d.tagName === 'DETAILS' && d.dataset.pid) { d.open ? openPrinters.add(+d.dataset.pid) : openPrinters.delete(+d.dataset.pid); }
+  const d = e.target; if (d.id === 'p-classes') people.classesOpen = d.open;
+  if (d.tagName === 'DETAILS' && d.dataset.pid) { d.open ? openPrinters.add(+d.dataset.pid) : openPrinters.delete(+d.dataset.pid); }
 }, true);
 document.addEventListener('submit', async (e) => {
   const f = e.target; const kind = f.dataset.form; if (!kind) return;
   e.preventDefault();
   const fd = new FormData(f);
+  if (kind === 'class') {
+    const r = await act(() => api('POST', '/api/staff/classes', Object.fromEntries(fd)), 'Class added');
+    if (r) { formDirty = false; await loadConfig(); await reloadPeople(true); }
+    return;
+  }
   if (kind === 'person') {
     const body = Object.fromEntries(fd), id = f.dataset.id;
     const r = await act(() => (id ? api('PUT', `/api/staff/users/${id}`, body) : api('POST', '/api/staff/users', body)), id ? 'Saved' : 'Person added');
-    if (r) { if (!id) people.sel = r.id; await reloadPeople(true); }
+    if (r) { formDirty = false; if (!id) people.sel = r.id; await loadConfig(); await reloadPeople(true); }
     return;
   }
   if (kind === 'printer') {

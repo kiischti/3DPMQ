@@ -4,6 +4,15 @@ All notable changes are listed here. The version number lives in `package.json`;
 Format based on [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/) (0.x: the API may still change).
 
 ## [Unreleased]
+### Added
+- Classes are now entries in the database. A class typed on the request form or in the person editor is created automatically if it is new; the class field is a dropdown (arrow button, filters while typing, keyboard support) that lists all existing classes and offers "New class: …" for what you type. Spelling is unified ("2ce" finds "2CE"), the list is sorted naturally (2CE before 10CE).
+- Staff can add, rename and delete classes on the People tab (rename fixes everybody in the class; a class with people cannot be deleted).
+- The Docker image carries the Unraid labels `net.unraid.docker.icon` and `net.unraid.docker.webui`, so the logo and the WebUI link show in Unraid's Docker tab without manual setup.
+### Fixed
+- People tab: re-opening a person right after saving could lose what had just been typed (a late reload redrew the form).
+### Changed
+- A known person who has no class yet (older records) gets the class from the next request; an existing class is never overwritten from the public form.
+- Existing classes are turned into entries automatically when the database is upgraded.
 
 ## [0.13.0] - 2026-11-03
 ### Added

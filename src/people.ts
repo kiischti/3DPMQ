@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response, Router } from 'express';
 import fs from 'node:fs';
-import { EMAIL_RE, ROLES, audit, db, normEmail } from './db.js';
+import { EMAIL_RE, ROLES, audit, classList, cleanClass, db, ensureClass, normEmail, sortClasses } from './db.js';
 
 type Row = Record<string, any>;
 const all = <T = Row>(sql: string, ...p: any[]): T[] => db.prepare(sql).all(...p) as unknown as T[];
@@ -62,7 +62,6 @@ function userList(q: string, role: string, cls: string): Row[] {
 function validateUser(b: Row, d: Deps, id?: number) {
   const name = String(b.name ?? '').trim().slice(0, 80);
   const email = normEmail(b.email).slice(0, 120);
-  const cls = String(b.class ?? '').trim().slice(0, 40);
   const role = String(b.role ?? 'student');
   const notes = String(b.notes ?? '').trim().slice(0, 1000);
   if (name.length < 2) throw d.httpError(400, 'Name is required');
@@ -70,7 +69,7 @@ function validateUser(b: Row, d: Deps, id?: number) {
   if (!(ROLES as readonly string[]).includes(role)) throw d.httpError(400, 'Role must be student, staff or other');
   const dup = get<Row>('SELECT id FROM users WHERE email = ? AND id != ?', email, id ?? -1);
   if (dup) throw d.httpError(409, 'Another person already uses this e-mail address');
-  return { name, email, class: cls, role, notes };
+  return { name, email, class: ensureClass(b.class), role, notes }; // last, so that a refused request creates no class
 }
 
 function removeFiles(rows: Row[]) {
@@ -158,6 +157,44 @@ export function peopleRoutes(staff: Router, d: Deps) {
     audit(d.actor(req), 'user-delete', undefined, `#${id} ${mode}`);
     d.broadcast();
     res.json({ ok: true, mode });
+  }));
+
+  // ---- classes: entries are created automatically when a new class is typed; staff can also add, rename and remove them
+  const classRows = () => sortClasses(
+    all(`SELECT c.id, c.name, (SELECT COUNT(*) FROM users u WHERE u.class = c.name) AS people FROM classes c`), (r) => r.name);
+  staff.get('/classes', d.wrap((_req, res) => res.json(classRows())));
+  staff.post('/classes', d.wrap((req, res) => {
+    const name = cleanClass(req.body?.name);
+    if (!name) throw d.httpError(400, 'Please enter a class name');
+    if (get('SELECT 1 FROM classes WHERE name = ?', name)) throw d.httpError(409, 'This class already exists');
+    ensureClass(name); audit(d.actor(req), 'class-add', undefined, name);
+    d.broadcast(); res.status(201).json({ ok: true, classes: classList() });
+  }));
+  staff.put('/classes/:id', d.wrap((req, res) => {
+    const id = parseInt(String(req.params.id), 10), name = cleanClass(req.body?.name);
+    const old = get<Row>('SELECT * FROM classes WHERE id = ?', id);
+    if (!old) throw d.httpError(404, 'Not found');
+    if (!name) throw d.httpError(400, 'Please enter a class name');
+    if (get('SELECT 1 FROM classes WHERE name = ? AND id != ?', name, id)) throw d.httpError(409, 'Another class already has this name');
+    db.exec('BEGIN');
+    try {
+      run('UPDATE classes SET name = ? WHERE id = ?', name, id);
+      run("UPDATE users SET class = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE class = ?", name, old.name);
+      run('UPDATE requests SET user_class = ? WHERE user_class = ?', name, old.name);
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    audit(d.actor(req), 'class-rename', undefined, `${old.name} -> ${name}`);
+    d.broadcast(); res.json({ ok: true });
+  }));
+  staff.delete('/classes/:id', d.wrap((req, res) => {
+    const id = parseInt(String(req.params.id), 10);
+    const c = get<Row>('SELECT * FROM classes WHERE id = ?', id);
+    if (!c) throw d.httpError(404, 'Not found');
+    const n = get<{ n: number }>('SELECT COUNT(*) AS n FROM users WHERE class = ?', c.name)!.n;
+    if (n > 0) throw d.httpError(409, `${n} ${n === 1 ? 'person is' : 'people are'} in class ${c.name}. Move them to another class first.`);
+    run('DELETE FROM classes WHERE id = ?', id);
+    audit(d.actor(req), 'class-delete', undefined, c.name);
+    d.broadcast(); res.json({ ok: true });
   }));
 
   // ---- statistics overview

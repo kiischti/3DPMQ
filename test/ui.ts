@@ -66,7 +66,12 @@ try {
   await user.waitForSelector('text=File passed the automatic checks');
   const chosen = await user.locator('#filament option:checked').textContent();
   ok(/PLA – Red/.test(chosen ?? ''), `UI: nearest filament preselected from G-code colour (${chosen})`);
-  await user.fill('#name', 'Alice Example'); await user.fill('#email', 'alice@example.org'); await user.fill('#class', '2CE'); await user.fill('#notes', 'Please print slowly');
+  // class field: a dropdown inside the same input; the very first class is simply typed and created
+  await user.click('.combo-arrow');
+  ok(/No classes yet/.test(await user.locator('.combo-list').innerText()), 'UI: class dropdown is empty before the first class exists');
+  await user.keyboard.press('Escape');
+  await user.fill('#name', 'Alice Example'); await user.fill('#email', 'alice@example.org'); await user.fill('#class', '2CE');
+  ok(/New class: “2CE”/.test(await user.locator('.combo-list').innerText()), 'UI: typing a new class shows the "new class" hint'); await user.fill('#notes', 'Please print slowly');
   await user.screenshot({ path: `${shots}/submit-ok.png` });
   await user.click('#send');
   await user.waitForSelector('table td:has-text("Alice Example")');
@@ -103,7 +108,16 @@ try {
   await user.click('a[data-r=submit]');
   await user.setInputFiles('#file', samples['good.gcode']);
   await user.waitForSelector('text=File passed the automatic checks');
-  await user.fill('#name', 'Bob Sample'); await user.fill('#email', 'bob@example.org'); await user.fill('#class', '3GE');
+  await user.fill('#name', 'Bob Sample'); await user.fill('#email', 'bob@example.org');
+  await user.click('.combo-arrow');
+  await user.waitForSelector('.combo-list li[data-v="2CE"]');
+  ok(await user.locator('.combo-list li[data-v="2CE"]').count() === 1, 'UI: the class created by the first request is now in the dropdown');
+  await user.screenshot({ path: `${shots}/class-dropdown.png` });
+  await user.keyboard.press('Escape');
+  await user.fill('#class', '3GE');
+  ok(/New class: “3GE”/.test(await user.locator('.combo-list').innerText()), 'UI: a second new class is offered as new');
+  await user.screenshot({ path: `${shots}/class-new.png` });
+  await user.keyboard.press('Escape');
   await user.click('#send'); await user.waitForSelector('table td:has-text("Bob Sample")');
   await page.click('button[data-t=review]'); await page.waitForSelector('text=From');
   await page.click('button[data-act=reject]');
@@ -124,10 +138,25 @@ try {
   await page.locator('#p-table tr:has-text("Alice Example") button[data-act=pedit]').click();
   await page.waitForSelector('#p-detail form[data-form=person]');
   await page.screenshot({ path: `${shots}/staff-people.png`, fullPage: true });
+  // person editor: pick an existing class from the dropdown ...
+  await page.locator('#p-detail .combo-arrow').click();
+  await page.waitForSelector('#p-detail .combo-list li[data-v="3GE"]');
+  ok(await page.locator('#p-detail .combo-list li[data-v="2CE"]').count() === 1 && await page.locator('#p-detail .combo-list li[data-v="3GE"]').count() === 1, 'UI: person editor offers all existing classes');
+  await page.locator('#p-detail .combo-list li[data-v="3GE"]').click();
+  ok(await page.locator('#p-detail input[name=class]').inputValue() === '3GE', 'UI: choosing a class fills the same field');
+  await page.locator('#p-detail button.primary').click();
+  await page.waitForFunction(() => /Alice Example[\s\S]*3GE/.test(document.querySelector('#p-table')?.innerText ?? ''), null, { timeout: 8000 });
+  ok(true, 'UI: chosen class shows in the list');
+  // ... or type a new one
+  await page.locator('#p-table tr:has-text("Alice Example") button[data-act=pedit]').click();
+  await page.waitForSelector('#p-detail form[data-form=person]');
   await page.locator('#p-detail input[name=class]').fill('4GE');
   await page.locator('#p-detail button.primary').click();
   await page.waitForFunction(() => document.querySelector('#p-table')?.innerText.includes('4GE'), null, { timeout: 8000 });
-  ok(true, 'UI: edited class shows in the list');
+  ok(true, 'UI: a new class typed in the editor is saved');
+  await page.locator('#p-classes summary').click();
+  await page.screenshot({ path: `${shots}/staff-classes.png`, fullPage: true });
+  ok(await page.locator('#p-classes tr:has-text("4GE")').count() === 1 && await page.locator('#p-classes tr:has-text("2CE")').count() === 1, 'UI: the Classes card lists all classes with their people');
   await page.fill('#p-q', 'bob'); await page.waitForFunction(() => !document.querySelector('#p-table')?.innerText.includes('Alice'), null, { timeout: 8000 });
   ok(await page.locator('#p-table tr:has-text("Bob Sample")').count() === 1, 'UI: search filters the list');
   await page.fill('#p-q', ''); await page.waitForSelector('#p-table td:has-text("Alice Example")');

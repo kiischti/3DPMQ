@@ -59,3 +59,12 @@ details > summary { cursor: pointer; font-weight: 600; } details[open] > summary
 .foot a { color: inherit; }
 
 tr.sel td { background: var(--bg); }
+.combo { position: relative; } .combo input { padding-right: 34px; }
+.combo-arrow { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 32px; border: 0; background: none; color: var(--muted); border-radius: 0 7px 7px 0; padding: 0; font-size: 14px; }
+.combo-arrow:hover:not(:disabled) { color: var(--accent); border: 0; }
+.combo-list { position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin: 3px 0 0; padding: 4px; list-style: none; max-height: 240px; overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+.combo-list li { padding: 5px 9px; border-radius: 6px; cursor: pointer; }
+.combo-list li:hover, .combo-list li.on { background: var(--bg); }
+.combo-list li.cur { font-weight: 700; }
+.combo-list li.new { color: var(--accent); font-weight: 600; }
+.combo-list li.empty { color: var(--muted); cursor: default; }
