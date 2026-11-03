@@ -11,20 +11,22 @@
   <meta name="theme-color" content="#fa6831">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-title="doc.title">
   <header>
-    <a class="brand" href="#/submit"><img src="logo.svg" alt="" class="logo">3DPMQ <span>3D Printer Makerspace Queue</span></a>
+    <a class="brand" href="#/submit"><img src="logo.svg" alt="" class="logo">3DPMQ <span data-i18n="app.subtitle">3D Printer Makerspace Queue</span></a>
     <nav id="nav">
-      <a href="#/submit" data-r="submit">Submit a print</a>
-      <a href="#/queue" data-r="queue">Queue</a>
-      <a href="#/printers" data-r="printers">Printers</a>
-      <a href="#/staff" data-r="staff">Staff</a>
+      <a href="#/submit" data-r="submit" data-i18n="nav.submit">Submit a print</a>
+      <a href="#/queue" data-r="queue" data-i18n="nav.queue">Queue</a>
+      <a href="#/printers" data-r="printers" data-i18n="nav.printers">Printers</a>
+      <a href="#/staff" data-r="staff" data-i18n="nav.staff">Staff</a>
     </nav>
-    <div id="conn" class="conn" title="Live connection"></div>
+    <div id="conn" class="conn" title="Live connection" data-i18n-title="nav.live"></div>
+    <select id="lang" class="langsel" aria-label="Language" data-i18n-aria-label="nav.language" data-i18n-title="nav.language"></select>
   </header>
   <main id="root"></main>
   <footer id="foot" class="foot"></footer>
   <div id="toast" class="toast" hidden></div>
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

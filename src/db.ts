@@ -107,7 +107,6 @@ export interface Rules {
   allowMulticolor: boolean;    // more than one filament used
   maxActivePerUser: number;    // pending + approved + printing, 0 = unlimited
   monthlyGramQuota: number;    // grams per user (by name) per calendar month, 0 = unlimited
-  requireClass: boolean;       // new students must give their class
 }
 
 export const DEFAULT_RULES: Rules = {
@@ -121,7 +120,6 @@ export const DEFAULT_RULES: Rules = {
   allowMulticolor: false,
   maxActivePerUser: 3,
   monthlyGramQuota: 0,
-  requireClass: true,
 };
 
 export function getRules(): Rules {
@@ -160,6 +158,8 @@ addColumn('requests', 'material', "TEXT NOT NULL DEFAULT ''");          // e.g. 
 addColumn('requests', 'printed_grams', 'REAL NOT NULL DEFAULT 0');       // grams actually printed (estimate x progress)
 addColumn('requests', 'printed_seconds', 'INTEGER NOT NULL DEFAULT 0');  // time actually spent printing
 addColumn('requests', 'last_time_printing', 'INTEGER NOT NULL DEFAULT 0'); // last "time printing" reported by the printer
+addColumn('requests', 'print_what', "TEXT NOT NULL DEFAULT ''");        // answer to "What do you want to print?"
+addColumn('requests', 'print_use', "TEXT NOT NULL DEFAULT ''");         // answer to "What will be its use?"
 db.exec('CREATE INDEX IF NOT EXISTS idx_requests_user ON requests(user_id)');
 
 if (!db.prepare('SELECT 1 FROM settings WHERE key = ?').get('migrated_users_v1')) {

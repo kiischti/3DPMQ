@@ -71,6 +71,7 @@ try {
   ok(/No classes yet/.test(await user.locator('.combo-list').innerText()), 'UI: class dropdown is empty before the first class exists');
   await user.keyboard.press('Escape');
   await user.fill('#name', 'Alice Example'); await user.fill('#email', 'alice@example.org'); await user.fill('#class', '2CE');
+  await user.fill('#what', 'A cable clip'); await user.fill('#use', 'Keeps cables tidy on my desk');
   ok(/New class: “2CE”/.test(await user.locator('.combo-list').innerText()), 'UI: typing a new class shows the "new class" hint'); await user.fill('#notes', 'Please print slowly');
   await user.screenshot({ path: `${shots}/submit-ok.png` });
   await user.click('#send');
@@ -108,7 +109,7 @@ try {
   await user.click('a[data-r=submit]');
   await user.setInputFiles('#file', samples['good.gcode']);
   await user.waitForSelector('text=File passed the automatic checks');
-  await user.fill('#name', 'Bob Sample'); await user.fill('#email', 'bob@example.org');
+  await user.fill('#name', 'Bob Sample'); await user.fill('#email', 'bob@example.org'); await user.fill('#what', 'A plant pot'); await user.fill('#use', 'Decoration');
   await user.click('.combo-arrow');
   await user.waitForSelector('.combo-list li[data-v="2CE"]');
   ok(await user.locator('.combo-list li[data-v="2CE"]').count() === 1, 'UI: the class created by the first request is now in the dropdown');
@@ -170,6 +171,44 @@ try {
   await page.screenshot({ path: `${shots}/staff-rules.png` });
   await page.click('button[data-t=filaments]'); await page.waitForSelector('text=Add');
   await page.screenshot({ path: `${shots}/staff-filaments.png` });
+  // ---- languages: English is the default; French and German are selectable on the page itself
+  ok(await user.locator('#lang').inputValue() === 'en' && await user.locator('html').getAttribute('lang') === 'en', 'UI: English is the default language');
+  ok((await user.locator('#lang option').allInnerTexts()).join('|') === 'English|Français|Deutsch', 'UI: the language selector offers English, French and German');
+  await user.goto(`${BASE}/#/submit`);
+  await user.selectOption('#lang', 'fr');
+  await user.waitForSelector('nav a:has-text("Envoyer une impression")');
+  ok(await user.locator('html').getAttribute('lang') === 'fr', 'UI: <html lang> follows the language');
+  ok(await user.locator('label[for=what]').innerText() === 'Que voulez-vous imprimer ? *' && await user.locator('label[for=use]').innerText() === 'À quoi servira l’objet ? *', 'UI: the two mandatory questions are in French');
+  await user.reload(); await user.waitForSelector('nav a:has-text("File d’attente")');
+  ok(await user.locator('#lang').inputValue() === 'fr', 'UI: the chosen language is remembered after a reload');
+  await user.selectOption('#lang', 'de');
+  await user.waitForSelector('nav a:has-text("Warteschlange")');
+  ok(/Klasse \*/.test(await user.locator('label[for=class]').innerText()) && /Druck einreichen/.test(await user.locator('h1').innerText()), 'UI: the submit page is in German');
+  await user.setInputFiles('#file', samples['too-hot.gcode']);
+  await user.waitForSelector('.issue.error');
+  ok(/Düsentemperatur/.test(await user.locator('.issue.error').first().innerText()), `UI: validation messages from the server are shown in German (${(await user.locator('.issue.error').first().innerText()).slice(0, 60)})`);
+  await user.screenshot({ path: `${shots}/submit-de.png`, fullPage: true });
+  await user.selectOption('#lang', 'fr');
+  await user.waitForSelector('nav a:has-text("Envoyer")');
+  await user.goto(`${BASE}/#/queue`); await user.waitForSelector('h1:has-text("File d’attente d’impression")');
+  ok(await user.locator('th:has-text("Statut")').count() === 1, 'UI: the queue page is in French');
+  await user.selectOption('#lang', 'en'); await user.waitForSelector('h1:has-text("Print queue")');
+  ok(/3DPMQ v\d+\.\d+\.\d+ · AGPL/.test(await user.locator('#foot').innerText()), 'UI: footer translated back to English');
+  // staff area and the 3D viewer window
+  await page.selectOption('#lang', 'fr');
+  await page.waitForSelector('button[data-t=people]:has-text("Personnes")');
+  ok(/Règles/.test(await page.locator('.tabs').innerText()) && /connecté en tant que Philippe/.test(await page.locator('#root').innerText()), 'UI: the staff area is in French');
+  await page.click('button[data-t=people]'); await page.waitForSelector('#p-table td:has-text("Alice Example")');
+  await page.screenshot({ path: `${shots}/staff-people-fr.png`, fullPage: true });
+  ok(/Élève/.test(await page.locator('#p-table').innerText()) && await page.locator('th:has-text("Plastique imprimé")').count() === 1, 'UI: people table and roles are in French');
+  const pvCtx = await browser.newContext(); const pv = await pvCtx.newPage();
+  await pv.goto(`${BASE}/preview.html?id=1`); // same origin, so it shares the language the staff chose (here: set directly)
+  await pv.evaluate(() => localStorage.setItem('mq_lang', 'fr')); await pv.reload();
+  await pv.waitForFunction(() => document.title === 'Aperçu 3D – 3DPMQ', null, { timeout: 8000 });
+  ok(await pv.locator('html').getAttribute('lang') === 'fr', 'UI: the 3D viewer window uses the selected language too');
+  await pvCtx.close();
+  await page.selectOption('#lang', 'en'); await page.waitForSelector('button[data-t=people]:has-text("People")');
+  ok(true, 'UI: staff area back to English');
   ok(errors.length === 0, `UI: no JavaScript errors${errors.length ? ' -> ' + errors.join(' | ') : ''}`);
 } catch (e) { fail++; console.error('UI TEST CRASHED', e, errors); }
 finally { await browser.close(); srv.kill(); await m1.close(); console.log(fail ? `\n${fail} failed` : '\nUI smoke test passed'); process.exit(fail ? 1 : 0); }

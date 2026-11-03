@@ -4,6 +4,12 @@ All notable changes are listed here. The version number lives in `package.json`;
 Format based on [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/) (0.x: the API may still change).
 
 ## [Unreleased]
+### Added
+- **Languages:** English (default), French and German, selectable on the page itself (selector in the header, remembered per browser). Covers the submit form, queue, printers, the whole staff area, the 3D viewer window, validation issues and error messages. Dates and numbers follow the language. New `npm test` check keeps the language files complete and consistent.
+- API errors and validation issues now carry a stable `code` and `params` next to the English `error` / `message` text.
+- Two mandatory questions on the request form: "What do you want to print?" and "What will be its use?" (at least 3 characters). Staff see the answers in the review and the Ready tab; they are part of the request export and are erased when a person is removed.
+### Changed
+- The class is mandatory for everybody except people with the role Staff (request form and person editor). The setting "new students must enter their class" is gone.
 
 ## [0.14.0] - 2026-11-03
 ### Added

@@ -1,3 +1,4 @@
+import type { Params } from './i18n.js';
 import type { NextFunction, Request, Response, Router } from 'express';
 import fs from 'node:fs';
 import { EMAIL_RE, ROLES, audit, classList, cleanClass, db, ensureClass, normEmail, sortClasses } from './db.js';
@@ -10,7 +11,7 @@ const run = (sql: string, ...p: any[]) => db.prepare(sql).run(...p);
 interface Deps {
   wrap: (fn: (req: Request, res: Response) => Promise<unknown> | unknown) => (req: Request, res: Response, next: NextFunction) => void;
   actor: (req: Request) => string;
-  httpError: (status: number, message: string) => Error;
+  httpError: (status: number, code: string, params?: Params) => Error;
   broadcast: () => void;
 }
 
@@ -64,11 +65,12 @@ function validateUser(b: Row, d: Deps, id?: number) {
   const email = normEmail(b.email).slice(0, 120);
   const role = String(b.role ?? 'student');
   const notes = String(b.notes ?? '').trim().slice(0, 1000);
-  if (name.length < 2) throw d.httpError(400, 'Name is required');
-  if (!EMAIL_RE.test(email)) throw d.httpError(400, 'A valid e-mail address is required');
-  if (!(ROLES as readonly string[]).includes(role)) throw d.httpError(400, 'Role must be student, staff or other');
+  if (name.length < 2) throw d.httpError(400, 'nameRequired');
+  if (!EMAIL_RE.test(email)) throw d.httpError(400, 'emailInvalid');
+  if (!(ROLES as readonly string[]).includes(role)) throw d.httpError(400, 'roleInvalid');
   const dup = get<Row>('SELECT id FROM users WHERE email = ? AND id != ?', email, id ?? -1);
-  if (dup) throw d.httpError(409, 'Another person already uses this e-mail address');
+  if (dup) throw d.httpError(409, 'emailDuplicate');
+  if (role !== 'staff' && !cleanClass(b.class)) throw d.httpError(400, 'classRequired');
   return { name, email, class: ensureClass(b.class), role, notes }; // last, so that a refused request creates no class
 }
 
@@ -100,7 +102,7 @@ export function peopleRoutes(staff: Router, d: Deps) {
   staff.get('/users/:id', d.wrap((req, res) => {
     const id = parseInt(String(req.params.id), 10);
     const u = get<Row>('SELECT * FROM users WHERE id = ?', id);
-    if (!u) throw d.httpError(404, 'Not found');
+    if (!u) throw d.httpError(404, 'notFound');
     const by = materialStats(id).get(id) ?? [];
     const months = all(
       `SELECT strftime('%Y-%m', COALESCE(finished_at, created_at)) AS month, COALESCE(NULLIF(material, ''), '?') AS material,
@@ -123,7 +125,7 @@ export function peopleRoutes(staff: Router, d: Deps) {
 
   staff.put('/users/:id', d.wrap((req, res) => {
     const id = parseInt(String(req.params.id), 10);
-    if (!get('SELECT 1 FROM users WHERE id = ?', id)) throw d.httpError(404, 'Not found');
+    if (!get('SELECT 1 FROM users WHERE id = ?', id)) throw d.httpError(404, 'notFound');
     const u = validateUser(req.body ?? {}, d, id);
     run("UPDATE users SET name=?, email=?, class=?, role=?, notes=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?", u.name, u.email, u.class, u.role, u.notes, id);
     // keep the copies on the person's requests in step, so queue and history show the corrected data
@@ -139,15 +141,15 @@ export function peopleRoutes(staff: Router, d: Deps) {
     const id = parseInt(String(req.params.id), 10);
     const mode = String(req.query.mode ?? 'anonymize') === 'purge' ? 'purge' : 'anonymize';
     const u = get<Row>('SELECT * FROM users WHERE id = ?', id);
-    if (!u) throw d.httpError(404, 'Not found');
+    if (!u) throw d.httpError(404, 'notFound');
     const open = get<{ n: number }>(`SELECT COUNT(*) AS n FROM requests WHERE user_id = ? AND status IN ${OPEN}`, id)!.n;
-    if (open > 0) throw d.httpError(409, `${u.name} has ${open} open request(s). Reject or cancel them first.`);
+    if (open > 0) throw d.httpError(409, 'openRequests', { name: u.name, n: open });
     const reqs = all('SELECT id, file_path FROM requests WHERE user_id = ?', id);
     db.exec('BEGIN');
     try {
       removeFiles(reqs);
       if (mode === 'purge') run('DELETE FROM requests WHERE user_id = ?', id);
-      else run("UPDATE requests SET user_id = NULL, user_name = 'Deleted user', user_email = '', user_class = '', notes = '', file_name = '(removed)', file_path = '', issues_json = '[]' WHERE user_id = ?", id);
+      else run("UPDATE requests SET user_id = NULL, user_name = 'Deleted user', user_email = '', user_class = '', notes = '', print_what = '', print_use = '', file_name = '(removed)', file_path = '', issues_json = '[]' WHERE user_id = ?", id);
       // scrub the audit trail of this person's name / e-mail as well
       run("UPDATE audit SET actor = '(deleted user)', detail = '' WHERE action = 'submit' AND request_id IN (SELECT id FROM requests WHERE user_id IS NULL AND user_name = 'Deleted user') AND actor = ?", u.name);
       run("DELETE FROM audit WHERE action = 'user-created' AND detail = ?", u.email);
@@ -165,17 +167,17 @@ export function peopleRoutes(staff: Router, d: Deps) {
   staff.get('/classes', d.wrap((_req, res) => res.json(classRows())));
   staff.post('/classes', d.wrap((req, res) => {
     const name = cleanClass(req.body?.name);
-    if (!name) throw d.httpError(400, 'Please enter a class name');
-    if (get('SELECT 1 FROM classes WHERE name = ?', name)) throw d.httpError(409, 'This class already exists');
+    if (!name) throw d.httpError(400, 'classNameRequired');
+    if (get('SELECT 1 FROM classes WHERE name = ?', name)) throw d.httpError(409, 'classExists');
     ensureClass(name); audit(d.actor(req), 'class-add', undefined, name);
     d.broadcast(); res.status(201).json({ ok: true, classes: classList() });
   }));
   staff.put('/classes/:id', d.wrap((req, res) => {
     const id = parseInt(String(req.params.id), 10), name = cleanClass(req.body?.name);
     const old = get<Row>('SELECT * FROM classes WHERE id = ?', id);
-    if (!old) throw d.httpError(404, 'Not found');
-    if (!name) throw d.httpError(400, 'Please enter a class name');
-    if (get('SELECT 1 FROM classes WHERE name = ? AND id != ?', name, id)) throw d.httpError(409, 'Another class already has this name');
+    if (!old) throw d.httpError(404, 'notFound');
+    if (!name) throw d.httpError(400, 'classNameRequired');
+    if (get('SELECT 1 FROM classes WHERE name = ? AND id != ?', name, id)) throw d.httpError(409, 'classNameTaken');
     db.exec('BEGIN');
     try {
       run('UPDATE classes SET name = ? WHERE id = ?', name, id);
@@ -189,9 +191,9 @@ export function peopleRoutes(staff: Router, d: Deps) {
   staff.delete('/classes/:id', d.wrap((req, res) => {
     const id = parseInt(String(req.params.id), 10);
     const c = get<Row>('SELECT * FROM classes WHERE id = ?', id);
-    if (!c) throw d.httpError(404, 'Not found');
+    if (!c) throw d.httpError(404, 'notFound');
     const n = get<{ n: number }>('SELECT COUNT(*) AS n FROM users WHERE class = ?', c.name)!.n;
-    if (n > 0) throw d.httpError(409, `${n} ${n === 1 ? 'person is' : 'people are'} in class ${c.name}. Move them to another class first.`);
+    if (n > 0) throw d.httpError(409, 'classInUse', { n, name: c.name });
     run('DELETE FROM classes WHERE id = ?', id);
     audit(d.actor(req), 'class-delete', undefined, c.name);
     d.broadcast(); res.json({ ok: true });
@@ -234,7 +236,7 @@ export function peopleRoutes(staff: Router, d: Deps) {
   staff.delete('/requests/:id', d.wrap((req, res) => {
     const id = parseInt(String(req.params.id), 10);
     const r = get<Row>(`SELECT id, file_path, status, started_at FROM requests WHERE id = ? AND ${CLEARABLE}`, id);
-    if (!r) throw d.httpError(409, 'Only refused or cancelled requests that never started can be removed');
+    if (!r) throw d.httpError(409, 'removeNotAllowed');
     removeFiles([r]);
     run('DELETE FROM requests WHERE id = ?', id);
     audit(d.actor(req), 'request-delete', id);

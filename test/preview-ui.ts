@@ -34,7 +34,7 @@ try {
   const fil = cfg.filaments.find((f: any) => f.material === 'PLA');
   const sub = await ctx.request.post(`${BASE}/api/requests`, { multipart: {
     file: { name: 'model.gcode', mimeType: 'text/plain', buffer: Buffer.from(modelGcode({ metadata: true })) },
-    name: 'Alice Example', email: 'alice@example.org', class: '2CE', filamentId: String(fil.id) } });
+    name: 'Alice Example', email: 'alice@example.org', class: '2CE', what: 'A test model', use: 'Testing the preview', filamentId: String(fil.id) } });
   const created = await sub.json();
   ok(sub.status() === 201, `request created (#${created.id})`);
 

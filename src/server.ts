@@ -9,6 +9,7 @@ import {
   detectFormat, hasErrors, modelEquals, parseMeta, scanFile, validate,
   type FilamentLite, type GcodeMeta, type Issue, type PrinterLite, type ScanResult,
 } from './gcode.js';
+import { httpError, msg } from './i18n.js';
 import { PrusaLink, type JobInfo, type PrinterStatus } from './prusalink.js';
 import { SOURCE_URL, VERSION } from './version.js';
 import { peopleRoutes } from './people.js';
@@ -21,6 +22,7 @@ const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '30', 10);
 const STAFF_PASSWORD = process.env.STAFF_PASSWORD ?? 'changeme';
 if (STAFF_PASSWORD === 'changeme') console.warn('WARNING: STAFF_PASSWORD is not set, using the insecure default "changeme".');
 const SECRET = getSecret();
+const mk = (level: 'error' | 'warn' | 'info', code: string, params: Record<string, string | number> = {}) => ({ level, code, key: code, params, message: msg(`iss.${code}`, params) });
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ------------------------------------------------------------------ db helpers
@@ -76,7 +78,7 @@ function cookie(req: Request, name: string): string | undefined {
 const staffOf = (req: Request) => readToken(cookie(req, 'mq_staff'));
 function requireStaff(req: Request, res: Response, next: NextFunction) {
   const s = staffOf(req);
-  if (!s) return void res.status(401).json({ error: 'Staff login required' });
+  if (!s) return void res.status(401).json({ error: msg('err.staffRequired'), code: 'staffRequired' });
   (req as any).staff = s;
   next();
 }
@@ -134,7 +136,7 @@ function requestView(r: Row, staff: boolean, queuePos?: number) {
   if (staff) {
     const eligible = r.status === 'approved' ? eligiblePrinters(r) : [];
     Object.assign(base, {
-      user_email: r.user_email, user_id: r.user_id, user_class: r.user_class, printed_grams: r.printed_grams, printed_seconds: r.printed_seconds,
+      user_email: r.user_email, user_id: r.user_id, user_class: r.user_class, print_what: r.print_what, print_use: r.print_use, printed_grams: r.printed_grams, printed_seconds: r.printed_seconds,
       notes: r.notes, meta: JSON.parse(r.meta_json), issues: JSON.parse(r.issues_json),
       reviewed_by: r.reviewed_by, file_size: r.file_size,
       eligible: eligible.map((p) => ({ id: p.id, name: p.name, available: printerAvailable(p) })),
@@ -208,14 +210,14 @@ function finishRequest(r: Row, status: 'done' | 'failed' | 'cancelled', error = 
 async function startJob(id: number, printerId: number, actor: string, ignoreFilament = false): Promise<void> {
   const r = get<Row>('SELECT * FROM requests WHERE id = ?', id);
   const p = get<Row>('SELECT * FROM printers WHERE id = ?', printerId);
-  if (!r || !p) throw httpError(404, 'Request or printer not found');
-  if (r.status !== 'approved') throw httpError(409, `Request is ${r.status}, not approved`);
-  if (!printerAvailable(p)) throw httpError(409, 'Printer is not available (offline, busy or needs attention)');
+  if (!r || !p) throw httpError(404, 'requestOrPrinterNotFound');
+  if (r.status !== 'approved') throw httpError(409, 'notApproved', { status: r.status });
+  if (!printerAvailable(p)) throw httpError(409, 'printerUnavailable');
   const meta: GcodeMeta = JSON.parse(r.meta_json);
-  if (!modelEquals(meta.printerModel, p.model)) throw httpError(409, `File is for ${meta.printerModel}, printer is ${p.model}`);
-  if (!ignoreFilament && p.loaded_filament_id !== r.filament_id) throw httpError(409, 'The requested filament is not loaded on this printer');
+  if (!modelEquals(meta.printerModel, p.model)) throw httpError(409, 'fileModelMismatch', { file: meta.printerModel ?? '', printer: p.model ?? '' });
+  if (!ignoreFilament && p.loaded_filament_id !== r.filament_id) throw httpError(409, 'filamentNotLoaded');
   const claimed = run(`UPDATE requests SET status = 'uploading', printer_id = ?, error = '' WHERE id = ? AND status = 'approved'`, printerId, id);
-  if (Number(claimed.changes) !== 1) throw httpError(409, 'Request was already started');
+  if (Number(claimed.changes) !== 1) throw httpError(409, 'alreadyStarted');
   audit(actor, 'start', id, `printer ${p.name}`);
   broadcast();
   const remote = `MQ${id}${fileExt(r.file_name)}`;
@@ -234,9 +236,6 @@ async function startJob(id: number, printerId: number, actor: string, ignoreFila
   })();
 }
 
-function httpError(status: number, message: string) {
-  return Object.assign(new Error(message), { status });
-}
 
 async function pollPrinter(p: Row) {
   const link = linkFor(p);
@@ -359,7 +358,7 @@ app.get('/api/events', (req, res) => {
 
 app.post('/api/validate', upload.single('file'), wrap(async (req, res) => {
   const f = req.file;
-  if (!f) return void res.status(400).json({ error: 'No file uploaded' });
+  if (!f) return void res.status(400).json({ error: msg('err.noFile'), code: 'noFile' });
   try {
     const fid = req.body.filamentId ? parseInt(req.body.filamentId, 10) : undefined;
     const { meta, issues } = await analyse(f, fid, getRules());
@@ -369,7 +368,7 @@ app.post('/api/validate', upload.single('file'), wrap(async (req, res) => {
 
 app.post('/api/requests', upload.single('file'), wrap(async (req, res) => {
   const f = req.file;
-  if (!f) return void res.status(400).json({ error: 'No file uploaded' });
+  if (!f) return void res.status(400).json({ error: msg('err.noFile'), code: 'noFile' });
   let keep = false;
   try {
     const rules = getRules();
@@ -377,14 +376,18 @@ app.post('/api/requests', upload.single('file'), wrap(async (req, res) => {
     const email = normEmail(req.body.email).slice(0, 120);
     const typedClass = cleanClass(req.body.class);
     const notes = String(req.body.notes ?? '').trim().slice(0, 1000);
+    const printWhat = String(req.body.what ?? '').replace(/\r\n/g, '\n').trim().slice(0, 500);
+    const printUse = String(req.body.use ?? '').replace(/\r\n/g, '\n').trim().slice(0, 500);
     const fid = parseInt(req.body.filamentId, 10);
     const existing = EMAIL_RE.test(email) ? get<Row>('SELECT * FROM users WHERE email = ?', email) : undefined;
     const issues0: Issue[] = [];
-    if (typedName.length < 2) issues0.push({ level: 'error', code: 'name', message: 'Please enter your name.' });
-    if (!EMAIL_RE.test(email)) issues0.push({ level: 'error', code: 'email', message: 'Please enter a valid e-mail address.' });
-    const needsClass = !existing || existing.role === 'student';
-    if (rules.requireClass && needsClass && !typedClass && !existing?.class) issues0.push({ level: 'error', code: 'class', message: 'Please enter your class.' });
-    if (!Number.isFinite(fid) || !filamentRow(fid)) issues0.push({ level: 'error', code: 'filament', message: 'Please choose a filament.' });
+    if (typedName.length < 2) issues0.push(mk('error', 'name'));
+    if (!EMAIL_RE.test(email)) issues0.push(mk('error', 'email'));
+    const needsClass = !existing || existing.role !== 'staff'; // the class may only be empty for staff members
+    if (needsClass && !typedClass && !existing?.class) issues0.push(mk('error', 'class'));
+    if (printWhat.length < 3) issues0.push(mk('error', 'what'));
+    if (printUse.length < 3) issues0.push(mk('error', 'use'));
+    if (!Number.isFinite(fid) || !filamentRow(fid)) issues0.push(mk('error', 'filament'));
 
     const { meta, issues: issues1 } = await analyse(f, Number.isFinite(fid) ? fid : undefined, rules);
     const issues = [...issues0, ...issues1];
@@ -393,17 +396,17 @@ app.post('/api/requests', upload.single('file'), wrap(async (req, res) => {
     if (existing) {
       const active = get<{ n: number }>(`SELECT COUNT(*) AS n FROM requests WHERE user_id = ? AND status IN ('pending','approved','uploading','printing')`, existing.id)!.n;
       if (rules.maxActivePerUser > 0 && active >= rules.maxActivePerUser) {
-        issues.push({ level: 'error', code: 'active-limit', message: `You already have ${active} open requests (limit ${rules.maxActivePerUser}). Wait until one finishes.` });
+        issues.push(mk('error', 'active-limit', { active, max: rules.maxActivePerUser }));
       }
       if (rules.monthlyGramQuota > 0 && meta?.grams !== undefined) {
         const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)).toISOString();
         const used = get<{ g: number | null }>(`SELECT SUM(grams) AS g FROM requests WHERE user_id = ? AND created_at >= ? AND status NOT IN ('rejected','cancelled')`, existing.id, monthStart)!.g ?? 0;
         if (used + meta.grams > rules.monthlyGramQuota) {
-          issues.push({ level: 'error', code: 'quota', message: `Monthly quota exceeded: ${used.toFixed(0)} g used + ${meta.grams.toFixed(0)} g requested > ${rules.monthlyGramQuota} g.` });
+          issues.push(mk('error', 'quota', { used: used.toFixed(0), requested: meta.grams.toFixed(0), max: rules.monthlyGramQuota }));
         }
       }
     }
-    if (hasErrors(issues) || !meta) return void res.status(422).json({ error: 'Validation failed', issues, meta });
+    if (hasErrors(issues) || !meta) return void res.status(422).json({ error: msg('err.validationFailed'), code: 'validationFailed', issues, meta });
 
     // find or create the person; an existing record is never overwritten from the public form (staff correct it)
     const staffInfo: Issue[] = [];
@@ -415,8 +418,8 @@ app.post('/api/requests', upload.single('file'), wrap(async (req, res) => {
         run('UPDATE users SET class = ?, updated_at = strftime(\'%Y-%m-%dT%H:%M:%fZ\',\'now\') WHERE id = ?', userClass, existing.id);
         run('UPDATE requests SET user_class = ? WHERE user_id = ?', userClass, existing.id);
       }
-      if (typedName.toLowerCase() !== existing.name.toLowerCase()) staffInfo.push({ level: 'info', code: 'name-differs', message: `Typed name "${typedName}" differs from the registered name "${existing.name}" for this e-mail.` });
-      if (typedClass && existing.class && typedClass.toLowerCase() !== existing.class.toLowerCase()) staffInfo.push({ level: 'info', code: 'class-differs', message: `Typed class "${typedClass}" differs from the registered class "${existing.class || '(none)'}".` });
+      if (typedName.toLowerCase() !== existing.name.toLowerCase()) staffInfo.push(mk('info', 'name-differs', { typed: typedName, registered: existing.name }));
+      if (typedClass && existing.class && typedClass.toLowerCase() !== existing.class.toLowerCase()) staffInfo.push(mk('info', 'class-differs', { typed: typedClass, registered: existing.class || '' }));
     } else {
       userClass = ensureClass(typedClass); // a class that is new becomes an entry of the classes table
       userId = Number(run('INSERT INTO users(name, email, class) VALUES (?,?,?)', typedName, email, userClass).lastInsertRowid);
@@ -426,9 +429,9 @@ app.post('/api/requests', upload.single('file'), wrap(async (req, res) => {
     const material = (meta.filamentTypes.length ? meta.filamentTypes : [filamentRow(fid)?.material ?? '']).map((t) => t.toUpperCase()).join('/');
     const token = crypto.randomBytes(16).toString('hex');
     const ins = run(
-      `INSERT INTO requests(user_id,user_name,user_email,user_class,filament_id,material,notes,file_name,file_path,file_size,meta_json,issues_json,grams,seconds,cancel_token)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      userId, userName, email, userClass, fid, material, notes, path.basename(f.originalname).slice(0, 200), f.path, f.size,
+      `INSERT INTO requests(user_id,user_name,user_email,user_class,filament_id,material,notes,print_what,print_use,file_name,file_path,file_size,meta_json,issues_json,grams,seconds,cancel_token)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      userId, userName, email, userClass, fid, material, notes, printWhat, printUse, path.basename(f.originalname).slice(0, 200), f.path, f.size,
       JSON.stringify(meta), JSON.stringify([...issues, ...staffInfo]), meta.grams ?? null, meta.seconds ?? null, token);
     keep = true;
     const id = Number(ins.lastInsertRowid);
@@ -441,20 +444,20 @@ app.post('/api/requests', upload.single('file'), wrap(async (req, res) => {
 app.post('/api/requests/:id/cancel', wrap(async (req, res) => {
   const id = parseInt(String(req.params.id), 10);
   const r = get<Row>('SELECT * FROM requests WHERE id = ?', id);
-  if (!r) throw httpError(404, 'Not found');
+  if (!r) throw httpError(404, 'notFound');
   const staff = staffOf(req);
   const tokenOk = typeof req.body?.token === 'string' && req.body.token === r.cancel_token;
-  if (!staff && !tokenOk) throw httpError(403, 'Only the submitter or staff can cancel this request');
+  if (!staff && !tokenOk) throw httpError(403, 'cancelForbidden');
   if (!['pending', 'approved'].includes(r.status) && !(staff && ['printing'].includes(r.status))) {
-    throw httpError(409, `Cannot cancel a request that is ${r.status}`);
+    throw httpError(409, 'cannotCancel', { status: r.status });
   }
   if (r.status === 'printing') {
     const p = get<Row>('SELECT * FROM printers WHERE id = ?', r.printer_id);
     if (p) {
       let jid: number | undefined;
-      try { jid = await activeJobId(p); } catch (e: any) { throw httpError(502, `Printer not reachable, the print was NOT stopped: ${e.message}`); }
+      try { jid = await activeJobId(p); } catch (e: any) { throw httpError(502, 'unreachableNotStopped', { detail: e.message }); }
       if (jid !== undefined) {
-        try { await linkFor(p).stop(jid); } catch (e: any) { throw httpError(502, `The printer did not stop the print: ${e.message}`); }
+        try { await linkFor(p).stop(jid); } catch (e: any) { throw httpError(502, 'printerNotStopped', { detail: e.message }); }
       }
     }
   }
@@ -467,13 +470,13 @@ app.post('/api/requests/:id/cancel', wrap(async (req, res) => {
 app.post('/api/staff/login', (req, res) => {
   const ip = req.ip ?? 'x';
   const f = loginFails.get(ip);
-  if (f && f.n >= 5 && Date.now() - f.t < 10 * 60_000) return void res.status(429).json({ error: 'Too many attempts, try again later' });
+  if (f && f.n >= 5 && Date.now() - f.t < 10 * 60_000) return void res.status(429).json({ error: msg('err.tooManyAttempts'), code: 'tooManyAttempts' });
   const pw = String(req.body?.password ?? '');
   const a = Buffer.from(crypto.createHash('sha256').update(pw).digest());
   const b = Buffer.from(crypto.createHash('sha256').update(STAFF_PASSWORD).digest());
   if (!crypto.timingSafeEqual(a, b)) {
     loginFails.set(ip, { n: (f && Date.now() - f.t < 10 * 60_000 ? f.n : 0) + 1, t: Date.now() });
-    return void res.status(401).json({ error: 'Wrong password' });
+    return void res.status(401).json({ error: msg('err.wrongPassword'), code: 'wrongPassword' });
   }
   loginFails.delete(ip);
   const name = String(req.body?.name ?? '').trim().slice(0, 60) || 'staff';
@@ -494,9 +497,9 @@ const actor = (req: Request) => (req as any).staff as string;
 staff.post('/requests/:id/approve', wrap((req, res) => {
   const id = parseInt(String(req.params.id), 10);
   const r = get<Row>('SELECT * FROM requests WHERE id = ?', id);
-  if (!r) throw httpError(404, 'Not found');
-  if (r.status !== 'pending') throw httpError(409, `Request is ${r.status}`);
-  if (!r.file_path || !fs.existsSync(r.file_path)) throw httpError(410, 'G-code file is gone');
+  if (!r) throw httpError(404, 'notFound');
+  if (r.status !== 'pending') throw httpError(409, 'requestStatus', { status: r.status });
+  if (!r.file_path || !fs.existsSync(r.file_path)) throw httpError(410, 'fileGone');
   run(`UPDATE requests SET status = 'approved', approved_at = ?, reviewed_by = ? WHERE id = ?`, nowIso(), actor(req), id);
   audit(actor(req), 'approve', id);
   broadcast(); res.json({ ok: true });
@@ -504,10 +507,10 @@ staff.post('/requests/:id/approve', wrap((req, res) => {
 staff.post('/requests/:id/reject', wrap((req, res) => {
   const id = parseInt(String(req.params.id), 10);
   const reason = String(req.body?.reason ?? '').trim().slice(0, 500);
-  if (!reason) throw httpError(400, 'Please give a reason');
+  if (!reason) throw httpError(400, 'reasonRequired');
   const r = get<Row>('SELECT * FROM requests WHERE id = ?', id);
-  if (!r) throw httpError(404, 'Not found');
-  if (!['pending', 'approved'].includes(r.status)) throw httpError(409, `Request is ${r.status}`);
+  if (!r) throw httpError(404, 'notFound');
+  if (!['pending', 'approved'].includes(r.status)) throw httpError(409, 'requestStatus', { status: r.status });
   run(`UPDATE requests SET status = 'rejected', reject_reason = ?, reviewed_by = ?, finished_at = ? WHERE id = ?`, reason, actor(req), nowIso(), id);
   audit(actor(req), 'reject', id, reason);
   broadcast(); res.json({ ok: true });
@@ -525,7 +528,7 @@ staff.post('/requests/:id/start', wrap(async (req, res) => {
 }));
 staff.get('/requests/:id/file', wrap((req, res) => {
   const r = get<Row>('SELECT * FROM requests WHERE id = ?', parseInt(String(req.params.id), 10));
-  if (!r || !r.file_path || !fs.existsSync(r.file_path)) throw httpError(404, 'File not available');
+  if (!r || !r.file_path || !fs.existsSync(r.file_path)) throw httpError(404, 'fileNotAvailable');
   res.download(r.file_path, r.file_name);
 }));
 // 3D preview: the extrusion toolpath of a request's file (cached; building it can take a few seconds for big files)
@@ -533,7 +536,7 @@ const previewCache = new Map<string, Buffer>();
 const previewBuilding = new Map<string, Promise<Buffer>>();
 staff.get('/requests/:id/preview', wrap(async (req, res) => {
   const r = get<Row>('SELECT * FROM requests WHERE id = ?', parseInt(String(req.params.id), 10));
-  if (!r || !r.file_path || !fs.existsSync(r.file_path)) throw httpError(404, 'File not available');
+  if (!r || !r.file_path || !fs.existsSync(r.file_path)) throw httpError(404, 'fileNotAvailable');
   const key = `${r.id}:${fs.statSync(r.file_path).mtimeMs}`;
   let payload = previewCache.get(key);
   if (!payload) {
@@ -548,7 +551,7 @@ staff.get('/requests/:id/preview', wrap(async (req, res) => {
       }).finally(() => previewBuilding.delete(key));
       previewBuilding.set(key, job);
     }
-    try { payload = await job; } catch (e: any) { throw httpError(422, `The file could not be read for the preview: ${e.message}`); }
+    try { payload = await job; } catch (e: any) { throw httpError(422, 'previewFailed', { detail: e.message }); }
   }
   res.setHeader('Content-Type', 'application/octet-stream');
   res.setHeader('Cache-Control', 'private, max-age=300');
@@ -557,8 +560,8 @@ staff.get('/requests/:id/preview', wrap(async (req, res) => {
 staff.get('/export.csv', (_req, res) => {
   const rows = all<Row>('SELECT r.*, p.name AS printer_name, f.material, f.colour_name FROM requests r LEFT JOIN printers p ON p.id = r.printer_id LEFT JOIN filaments f ON f.id = r.filament_id ORDER BY r.id');
   const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const head = ['id', 'created_at', 'user_name', 'user_email', 'status', 'file_name', 'material', 'colour', 'grams', 'seconds', 'printer', 'started_at', 'finished_at', 'reviewed_by', 'reject_reason', 'error'];
-  const lines = rows.map((r) => [r.id, r.created_at, r.user_name, r.user_email, r.status, r.file_name, r.material, r.colour_name, r.grams, r.seconds, r.printer_name, r.started_at, r.finished_at, r.reviewed_by, r.reject_reason, r.error].map(esc).join(','));
+  const head = ['id', 'created_at', 'user_name', 'user_email', 'user_class', 'status', 'file_name', 'material', 'colour', 'grams', 'seconds', 'printer', 'started_at', 'finished_at', 'reviewed_by', 'reject_reason', 'print_what', 'print_use', 'error'];
+  const lines = rows.map((r) => [r.id, r.created_at, r.user_name, r.user_email, r.user_class, r.status, r.file_name, r.material, r.colour_name, r.grams, r.seconds, r.printer_name, r.started_at, r.finished_at, r.reviewed_by, r.reject_reason, r.print_what, r.print_use, r.error].map(esc).join(','));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="3dpmq-export.csv"');
   res.send([head.join(','), ...lines].join('\n'));
@@ -577,9 +580,9 @@ const printerBody = (b: Row) => ({
   auto_start: b.auto_start ? 1 : 0,
 });
 function checkPrinter(p: ReturnType<typeof printerBody>) {
-  if (!p.name) throw httpError(400, 'Name is required');
-  if (!/^https?:\/\/[^\s/]+/.test(p.base_url)) throw httpError(400, 'Address must look like http://192.168.1.50');
-  if (p.nozzle !== null && !(p.nozzle > 0 && p.nozzle < 2)) throw httpError(400, 'Nozzle must be between 0 and 2 mm');
+  if (!p.name) throw httpError(400, 'nameRequired');
+  if (!/^https?:\/\/[^\s/]+/.test(p.base_url)) throw httpError(400, 'addressInvalid');
+  if (p.nozzle !== null && !(p.nozzle > 0 && p.nozzle < 2)) throw httpError(400, 'nozzleRange');
 }
 staff.post('/printers', wrap((req, res) => {
   const p = printerBody(req.body); checkPrinter(p);
@@ -591,7 +594,7 @@ staff.post('/printers', wrap((req, res) => {
 staff.put('/printers/:id', wrap((req, res) => {
   const id = parseInt(String(req.params.id), 10);
   const old = get<Row>('SELECT * FROM printers WHERE id = ?', id);
-  if (!old) throw httpError(404, 'Not found');
+  if (!old) throw httpError(404, 'notFound');
   const p = printerBody(req.body); checkPrinter(p);
   run('UPDATE printers SET name=?,base_url=?,username=?,password=?,storage=?,model=?,nozzle=?,enabled=?,auto_start=? WHERE id=?',
     p.name, p.base_url, p.username, p.password === undefined || p.password === '' ? old.password : p.password, p.storage, p.model, p.nozzle, p.enabled, p.auto_start, id);
@@ -600,7 +603,7 @@ staff.put('/printers/:id', wrap((req, res) => {
 }));
 staff.delete('/printers/:id', wrap((req, res) => {
   const id = parseInt(String(req.params.id), 10);
-  if (get('SELECT 1 FROM requests WHERE printer_id = ? AND status IN (\'printing\',\'uploading\')', id)) throw httpError(409, 'Printer has a running job');
+  if (get('SELECT 1 FROM requests WHERE printer_id = ? AND status IN (\'printing\',\'uploading\')', id)) throw httpError(409, 'printerRunning');
   run('DELETE FROM printers WHERE id = ?', id);
   runtime.delete(id); audit(actor(req), 'printer-delete', undefined, String(id));
   broadcast(); res.json({ ok: true });
@@ -612,21 +615,21 @@ staff.post('/printers/:id/bed-clear', wrap((req, res) => {
 }));
 staff.post('/printers/:id/loaded', wrap((req, res) => {
   const fid = req.body?.filamentId ? parseInt(req.body.filamentId, 10) : null;
-  if (fid !== null && !filamentRow(fid)) throw httpError(400, 'Unknown filament');
+  if (fid !== null && !filamentRow(fid)) throw httpError(400, 'filamentUnknown');
   run('UPDATE printers SET loaded_filament_id = ? WHERE id = ?', fid, parseInt(String(req.params.id), 10));
   audit(actor(req), 'filament-loaded', undefined, `${req.params.id}:${fid}`);
   broadcast(); res.json({ ok: true });
 }));
 staff.post('/printers/:id/:action', wrap(async (req, res) => {
-  if (!['pause', 'resume', 'stop'].includes(String(req.params.action))) throw httpError(404, 'Unknown action');
+  if (!['pause', 'resume', 'stop'].includes(String(req.params.action))) throw httpError(404, 'actionUnknown');
   const p = get<Row>('SELECT * FROM printers WHERE id = ?', parseInt(String(req.params.id), 10));
-  if (!p) throw httpError(404, 'Not found');
+  if (!p) throw httpError(404, 'notFound');
   let jid: number | undefined;
-  try { jid = await activeJobId(p); } catch (e: any) { throw httpError(502, `Printer not reachable: ${e.message}`); }
-  if (jid === undefined) throw httpError(409, 'No running job on this printer');
+  try { jid = await activeJobId(p); } catch (e: any) { throw httpError(502, 'printerUnreachable', { detail: e.message }); }
+  if (jid === undefined) throw httpError(409, 'noRunningJob');
   const l = linkFor(p), action = String(req.params.action);
   try { await (action === 'pause' ? l.pause(jid) : action === 'resume' ? l.resume(jid) : l.stop(jid)); }
-  catch (e: any) { throw httpError(502, `The printer refused to ${action}: ${e.message}`); }
+  catch (e: any) { throw httpError(502, 'printerRefused', { action, detail: e.message }); }
   audit(actor(req), `printer-${String(req.params.action)}`, undefined, p.name);
   void tick(); res.json({ ok: true });
 }));
@@ -648,7 +651,7 @@ const filBody = (b: Row) => ({
 });
 staff.post('/filaments', wrap((req, res) => {
   const f = filBody(req.body);
-  if (!f.material || !f.colour_name) throw httpError(400, 'Material and colour name are required');
+  if (!f.material || !f.colour_name) throw httpError(400, 'filamentFields');
   const r = run('INSERT INTO filaments(material,colour_name,colour_hex,in_stock) VALUES (?,?,?,?)', f.material, f.colour_name, f.colour_hex, f.in_stock);
   broadcast(); res.status(201).json({ id: Number(r.lastInsertRowid) });
 }));
@@ -676,7 +679,6 @@ staff.put('/rules', wrap((req, res) => {
     maxFileMB: n(b.maxFileMB, cur.maxFileMB), maxActivePerUser: n(b.maxActivePerUser, cur.maxActivePerUser),
     monthlyGramQuota: n(b.monthlyGramQuota, cur.monthlyGramQuota),
     requirePrusaSlicer: b.requirePrusaSlicer ?? cur.requirePrusaSlicer, allowMulticolor: b.allowMulticolor ?? cur.allowMulticolor,
-    requireClass: b.requireClass ?? cur.requireClass,
   };
   audit(actor(req), 'rules', undefined, JSON.stringify(next));
   res.json(setRules(next));
@@ -687,10 +689,10 @@ app.use('/api/staff', staff);
 
 // ---- errors
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  if (err instanceof multer.MulterError) return void res.status(413).json({ error: err.code === 'LIMIT_FILE_SIZE' ? `File is larger than ${MAX_UPLOAD_MB} MB` : err.message });
+  if (err instanceof multer.MulterError) return void res.status(413).json({ error: err.code === 'LIMIT_FILE_SIZE' ? msg('err.fileTooLarge', { max: MAX_UPLOAD_MB }) : err.message, code: err.code === 'LIMIT_FILE_SIZE' ? 'fileTooLarge' : 'upload', params: { max: MAX_UPLOAD_MB } });
   const status = err.status ?? 500;
   if (status >= 500) console.error(err);
-  res.status(status).json({ error: status >= 500 ? 'Internal error' : err.message });
+  res.status(status).json(status >= 500 ? { error: msg('err.internal'), code: 'internal' } : { error: err.message, code: err.code, params: err.params });
 });
 
 // ------------------------------------------------------------------ boot

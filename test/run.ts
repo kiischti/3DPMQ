@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { startMock } from '../mock/mock-prusalink.js';
+import { DatabaseSync } from 'node:sqlite';
 import { writeSamples } from './make-samples.js';
 
 const PORT = 3911, BASE = `http://localhost:${PORT}`;
@@ -26,7 +27,7 @@ async function api(method: string, url: string, body?: any, form?: FormData) {
 const form = (file: string, fields: Record<string, string> = {}) => {
   const fd = new FormData();
   fd.append('file', new Blob([fs.readFileSync(samples[file])]), file);
-  for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+  for (const [k, v] of Object.entries({ what: 'A test part', use: 'Only for testing', ...fields })) fd.append(k, v);
   return fd;
 };
 const codes = (d: any) => (d.issues as any[]).map((i) => i.code);
@@ -83,6 +84,12 @@ try {
   ok(codes(await v('abs.gcode')).includes('material-not-allowed'), 'ABS not allowed');
   ok(codes(await v('wrong-printer.gcode', pla.id)).includes('printer-model'), 'wrong printer model rejected');
   ok(codes(await v('wrong-nozzle.gcode', pla.id)).includes('nozzle'), 'wrong nozzle rejected');
+  { // every issue carries a stable key + parameters so the web page can show it in the selected language
+    const wp = (await v('wrong-printer.gcode', pla.id)).issues.find((i: any) => i.code === 'printer-model');
+    ok(wp && wp.key === 'printer-model-mismatch' && wp.params.model && wp.params.known && /Printers available here/.test(wp.message), 'issues carry key, params and the English text');
+    const tl = (await v('too-long.gcode', pla.id)).issues.find((i: any) => i.code === 'too-long');
+    ok(tl && tl.params.max !== undefined && tl.params.hours !== undefined && tl.message.includes(String(tl.params.hours)), 'issue parameters are filled into the message');
+  }
   ok(codes(await v('cura.gcode', pla.id)).includes('slicer'), 'non-PrusaSlicer file rejected');
   ok(codes(await v('forbidden.gcode', pla.id)).includes('forbidden-gcode'), 'M502/M500/M997 rejected');
   ok(codes(await v('pauses.gcode', pla.id)).includes('pauses') && (await v('pauses.gcode', pla.id)).ok, 'M600 only warns');
@@ -239,7 +246,7 @@ try {
   const erinReqId = (await api('GET', '/api/state')).data.requests.find((x: any) => x.user_email === emailOf('Erin')).id;
   ok((await api('DELETE', `/api/staff/users/${erin.id}`)).status === 200, 'person removed (personal data erased)');
   const erinReq = (await api('GET', '/api/state')).data.requests.find((x: any) => x.id === erinReqId);
-  ok(erinReq.user_name === 'Deleted user' && erinReq.user_email === '' && erinReq.user_id === null && erinReq.file_name === '(removed)', 'their requests are anonymised');
+  ok(erinReq.user_name === 'Deleted user' && erinReq.user_email === '' && erinReq.user_id === null && erinReq.file_name === '(removed)' && erinReq.print_what === '' && erinReq.print_use === '', 'their requests are anonymised (including the answers)');
   const ginaId = gina.id;
   ok((await api('DELETE', `/api/staff/users/${ginaId}?mode=anonymize`)).status === 200, 'person with finished print removed');
   ok((await api('GET', '/api/staff/stats')).data.by_material.find((m: any) => m.material === 'PLA').grams >= st.by_material.find((m: any) => m.material === 'PLA').grams, 'anonymous statistics are kept');
@@ -263,7 +270,10 @@ try {
   const ppl = (await api('GET', '/api/staff/users')).data as any[];
   ok(ppl.find((u) => u.email === 'dan@example.org').class === 'Z9' && ppl.find((u) => u.email === 'ada@example.org').class === '2CE', 'people keep the stored spelling of the class');
   // a known person without a class (older record): the blank is filled once, afterwards never overwritten from the public form
-  const leg = await api('POST', '/api/staff/users', { name: 'Legacy Person', email: 'legacy@example.org', class: '', role: 'student' });
+  ok((await api('POST', '/api/staff/users', { name: 'Legacy Person', email: 'legacy@example.org', class: '', role: 'student' })).status === 400, 'staff cannot create a student without a class');
+  const legDb = new DatabaseSync(path.join(dataDir, '3dpmq.db')); // a record from before the class was mandatory
+  const leg = { data: { id: Number(legDb.prepare("INSERT INTO users(name, email, class, role) VALUES ('Legacy Person', 'legacy@example.org', '', 'student')").run().lastInsertRowid) } };
+  legDb.close();
   cookie = '';
   ok((await subx('good.gcode', { name: 'Legacy Person', email: 'legacy@example.org', class: 'Q1' })).status === 201, 'known person without class can submit');
   await subx('good.gcode', { name: 'Legacy Person', email: 'legacy@example.org', class: 'Q2' });
@@ -287,9 +297,38 @@ try {
   const renamed = ((await api('GET', '/api/staff/users')).data as any[]).filter((u) => u.class === 'Z9x').length;
   const dReq = (await api('GET', '/api/state')).data.requests.find((x: any) => x.user_email === 'dan@example.org');
   ok(renamed === 2 && dReq.user_class === 'Z9x' && !(await classesNow()).includes('Z9'), 'renaming moves the people and their requests to the new name');
+  { const r = await api('DELETE', `/api/staff/classes/${z9.id}`);
+    ok(r.status === 409 && r.data.code === 'classInUse' && r.data.params.n === z9.people && r.data.params.name === 'Z9x' && /people are in class Z9x/.test(r.data.error), 'API errors carry a code and parameters for translation'); }
   ok((await api('DELETE', `/api/staff/classes/${z9.id}`)).status === 409, 'a class with people cannot be deleted');
   ok((await api('DELETE', `/api/staff/classes/${empty1.id}`)).status === 200 && !(await classesNow()).includes('Empty1'), 'an empty class can be deleted');
   ok((await api('DELETE', `/api/staff/classes/${empty1.id}`)).status === 404, 'deleting it again is a clean 404');
+
+  // the class is mandatory for everybody except staff members
+  ok((await api('POST', '/api/staff/users', { name: 'Odd Other', email: 'other@example.org', class: '', role: 'other' })).status === 400, 'role "other" also needs a class');
+  ok((await api('POST', '/api/staff/users', { name: 'Odd Other', email: 'other@example.org', class: 'Guests', role: 'other' })).status === 201, '... and works with one');
+  const samId = ((await api('GET', '/api/staff/users')).data as any[]).find((u) => u.email === 'sam@example.org').id;
+  ok((await api('PUT', `/api/staff/users/${samId}`, { name: 'Sam Staff', email: 'sam@example.org', class: '', role: 'student' })).status === 400, 'a staff member without class cannot be turned into a student');
+  ok((await api('PUT', `/api/staff/users/${samId}`, { name: 'Sam Staff', email: 'sam@example.org', class: '', role: 'staff' })).status === 200, 'a staff member may keep an empty class');
+  cookie = '';
+  ok(codes((await subx('good.gcode', { name: 'Odd Other', email: 'other@example.org', class: '' })).data).includes('class') === false, 'a person with a stored class does not need to type it again');
+  cookie = staffCookie;
+
+  // the two questions
+  cookie = '';
+  const q0 = await subx('good.gcode', { name: 'Quentin Q', email: 'quentin@example.org', class: '2CE', what: '', use: '' });
+  ok(q0.status === 422 && codes(q0.data).includes('what') && codes(q0.data).includes('use'), 'both questions are mandatory');
+  const q1 = await subx('good.gcode', { name: 'Quentin Q', email: 'quentin@example.org', class: '2CE', what: 'ab', use: '  x ' });
+  ok(q1.status === 422 && codes(q1.data).includes('what') && codes(q1.data).includes('use'), 'a few letters are not an answer (at least 3 characters)');
+  const q2 = await subx('good.gcode', { name: 'Quentin Q', email: 'quentin@example.org', class: '2CE', what: 'A phone stand', use: 'Holds my phone\nwhile filming\n' + 'x'.repeat(600) });
+  ok(q2.status === 201, 'with both answers the request is accepted');
+  cookie = staffCookie;
+  const qreq = (await api('GET', '/api/state')).data.requests.find((x: any) => x.id === q2.data.id);
+  ok(qreq.print_what === 'A phone stand' && qreq.print_use.startsWith('Holds my phone\nwhile filming') && qreq.print_use.length === 500, 'staff see the answers (line breaks kept, limited to 500 characters)');
+  cookie = '';
+  ok(!(await api('GET', '/api/state')).data.requests.some((x: any) => 'print_what' in x || 'print_use' in x), 'the answers are not shown on the public queue');
+  cookie = staffCookie;
+  const exp = await (await fetch(BASE + '/api/staff/export.csv', { headers: { Cookie: staffCookie } })).text();
+  ok(exp.split('\n')[0].includes('print_what') && exp.includes('A phone stand'), 'the request export contains the answers');
 
   // clearing refused requests
   const before = (await api('GET', '/api/state')).data.requests;

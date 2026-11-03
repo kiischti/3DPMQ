@@ -14,7 +14,7 @@ PrusaSlicer ──export G-code──▶ 3DPMQ (validate · name · filament · 
 
 **For users** (no account needed)
 - Drop a `.gcode` / `.bgcode` file; instant feedback: printer profile, material, colour, time, grams, and a list of problems *before* sending.
-- Enter name, **e-mail** and **class**, pick a filament from the makerspace's list (pre-selected from the G-code colour), add a note.
+- Enter name, **e-mail** and **class**, answer the two mandatory questions (**What do you want to print?** and **What will be its use?**, at least 3 characters each), pick a filament from the makerspace's list (pre-selected from the G-code colour), add a note. Staff see the answers in the review.
 - Public queue with live status, queue position and progress; cancel your own request while it is pending/approved.
 
 **Automatic validation** (all limits editable by staff on the *Rules* tab)
@@ -89,10 +89,18 @@ Each request on the Review and Ready tabs has a **3D preview** link. It opens a 
 - Needs a browser with WebGL 2 (any current browser). Files with more than 1.5 million moves show only their first part (a notice says so). Arcs in the radius form (`G2 … R`) are drawn as straight lines; the usual centre form is drawn as arcs.
 - Only staff can open it (it needs the staff login).
 
+## Languages
+The whole web interface (submit form, queue, printers, staff area, 3D viewer, validation messages and error messages) is available in **English** (default), **French** and **German**. Pick the language in the selector at the top right; it is remembered in the browser (`localStorage`, key `mq_lang`) and the 3D viewer window follows it. There is deliberately no automatic detection from the browser: the page starts in English until somebody chooses otherwise.
+
+- The texts live in `public/lang/en.json`, `fr.json` and `de.json` (flat key → text; `{name}` marks a value that is filled in; `key.one` / `key.other` are the singular and plural forms).
+- The server always builds English text (logs, API clients), but every validation issue and API error also carries a stable `code` and `params`; the web page translates those. Texts that staff type themselves (rejection reasons, notes) and the technical messages that come from a printer are shown as they are.
+- Dates and numbers follow the selected language.
+- **Adding another language:** copy `public/lang/en.json` to `<code>.json`, translate the values, and add the code and its name to `LANGS` and `LOCALES` at the top of `public/i18n.js` (and to the list in `src/i18n.ts`). `npm test` checks that every language has exactly the same keys and placeholders, and that every text the code asks for exists.
+
 ## People and statistics
 Every request is linked to a person. A person is created automatically from the first request (name, e-mail, class) and recognised by e-mail address afterwards (case-insensitive).
 The public form never overwrites an existing person: if someone types a different name or class for a known e-mail, staff see a note on the request and can correct the record on the People tab.
-Staff and other users are people too, with the same fields, statistics and edit/remove options; set the *role* to Staff or Other (the class is then not required).
+Staff and other users are people too, with the same fields, statistics and edit/remove options; set the *role* to Staff or Other. **The class is mandatory for everybody except people with the role Staff**; this is enforced on the request form and in the person editor.
 Corrections to a person also update the name, e-mail and class shown on their requests.
 
 **Classes** are entries in the database. On the request form and in the person editor the class field is a dropdown: the arrow lists all existing classes, typing filters them, and a name that does not exist yet is offered as "New class: …" and **created automatically** when the request (or person) is saved.
@@ -131,6 +139,7 @@ Unraid keeps a copy of the icon it downloaded; if a failed download is stuck, de
 ## Tests
 - `npm test` — (0) version consistency, (1) `.bgcode` reader checks on real encoder output in `test/fixtures`, (2) end-to-end with a real server and two mock printers: validation rules, approval, upload, auto-start, limits, access control.
 - `BGCODE_BIN=/path/to/bgcode npx tsx test/bgcode.ts` — full cross-check: encodes the sample with every compression / encoding / checksum combination using Prusa's `bgcode` tool (build it from https://github.com/prusa3d/libbgcode) and compares the decoded commands with the original.
+- The i18n check (part of `npm test`) compares the three language files (same keys, same placeholders) and every key used in the code.
 - `npx tsx test/preview-ui.ts` — opens the 3D viewer in headless Chromium and checks from real canvas pixels that the model is drawn, rotates when dragged, zooms, pans, and reacts to the layer slider and the feature toggles.
 - `npx tsx test/ui.ts` — drives the web UI in headless Chromium and saves screenshots to `test/shots/`.
 
@@ -200,6 +209,8 @@ src/scan.ts       line scanner (temperatures, forbidden commands)
 src/bgcode.ts     binary G-code reader (Heatshrink, MeatPack, Deflate, CRC32)
 src/preview.ts    toolpath extraction for the 3D preview
 public/preview.*  the 3D viewer (WebGL 2, no libraries)
+public/i18n.js    language switch; texts in public/lang/*.json (en, fr, de)
+src/i18n.ts       English message builder, error codes
 src/prusalink.ts  PrusaLink v1 client with HTTP Digest auth
 src/server.ts     REST API, queue, scheduler/poller, SSE, staff auth
 src/db.ts         SQLite schema, rules

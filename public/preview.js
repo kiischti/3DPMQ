@@ -1,16 +1,17 @@
 'use strict';
 /* 3D toolpath viewer: WebGL2, no libraries. Every extrusion segment is drawn as a screen-space ribbon (instanced quads). */
-(function () {
+I18N.ready.then(function () {
   const $ = (s) => document.querySelector(s);
   const canvas = $('#gl');
   const msg = $('#msg');
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  addEventListener('langchange', () => location.reload());
   const fail = (text) => { msg.hidden = false; msg.textContent = text; };
 
   const id = new URLSearchParams(location.search).get('id');
-  if (!id || !/^\d+$/.test(id)) return fail('No request given.');
+  if (!id || !/^\d+$/.test(id)) return fail(t('pv.noRequest'));
   const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
-  if (!gl) return fail('This browser cannot do WebGL 2, so the 3D preview is not available.');
+  if (!gl) return fail(t('pv.noWebgl'));
 
   // ------------------------------------------------------------ colours
   const hsv = (h, s, v) => { const f = (n) => { const k = (n + h * 6) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); }; return [f(5), f(3), f(1)]; };
@@ -85,16 +86,16 @@
   let data;
   (async function load() {
     let res;
-    try { res = await fetch(`/api/staff/requests/${id}/preview`, { credentials: 'same-origin' }); } catch (e) { return fail('Could not reach the server.'); }
-    if (res.status === 401) return fail('Please log in as staff in the main window, then reload this window.');
-    if (!res.ok) { let m = ''; try { m = (await res.json()).error; } catch { /* ignore */ } return fail(m || `Preview not available (HTTP ${res.status}).`); }
+    try { res = await fetch(`/api/staff/requests/${id}/preview`, { credentials: 'same-origin' }); } catch (e) { return fail(t('pv.noServer')); }
+    if (res.status === 401) return fail(t('pv.login'));
+    if (!res.ok) { let m = ''; try { const d = await res.json(); m = d.code && has(`err.${d.code}`) ? t(`err.${d.code}`, d.params) : d.error; } catch { /* ignore */ } return fail(m || t('pv.unavailable', { status: res.status })); }
     const buf = await res.arrayBuffer();
     const hl = new DataView(buf).getUint32(0, true);
     const head = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, hl)));
     const n = head.count, off = 4 + hl;
-    if (!n) return fail('This file contains no extrusion moves to show.');
+    if (!n) return fail(t('pv.noMoves'));
     data = { head, segs: new Float32Array(buf, off, n * 6), types: new Uint8Array(buf, off + n * 24, n) };
-    try { start(); } catch (e) { fail('The 3D preview could not start: ' + e.message); }
+    try { start(); } catch (e) { fail(t('pv.startFailed', { detail: e.message })); }
   })();
 
   // ------------------------------------------------------------ viewer
@@ -136,19 +137,19 @@
     const layers = head.layers;
     const counts = new Array(names.length).fill(0); for (let i = 0; i < n; i++) counts[types[i]]++;
     const legend = $('#legend');
-    legend.innerHTML = names.map((nm, i) => { const c = pal.slice(i * 3, i * 3 + 3); return `<label><input type="checkbox" data-t="${i}" checked><span class="sw" style="background:rgb(${c.map((v) => Math.round(v * 255))})"></span>${esc(nm)}</label>`; }).join('')
-      + `<select id="mode"><option value="0">Colour: feature type</option><option value="1">Colour: height</option></select><button id="reset">Reset view</button>`;
+    legend.innerHTML = names.map((nm, i) => { const c = pal.slice(i * 3, i * 3 + 3); return `<label><input type="checkbox" data-t="${i}" checked><span class="sw" style="background:rgb(${c.map((v) => Math.round(v * 255))})"></span>${esc(has('type.' + nm.toLowerCase()) ? t('type.' + nm.toLowerCase()) : nm)}</label>`; }).join('')
+      + `<select id="mode"><option value="0">${esc(t('pv.colourType'))}</option><option value="1">${esc(t('pv.colourHeight'))}</option></select><button id="reset">${esc(t('pv.reset'))}</button>`;
     legend.hidden = false;
     legend.addEventListener('change', (e) => { if (e.target.dataset.t !== undefined) { vis[+e.target.dataset.t] = e.target.checked ? 1 : 0; draw(); } if (e.target.id === 'mode') { mode = +e.target.value; draw(); } });
     $('#reset').onclick = () => { resetView(); draw(); };
     $('#title').innerHTML = `<b>#${esc(head.id)} · ${esc(head.file)}</b> <span style="color:#98a2b3">${head.user ? '· ' + esc(head.user) : ''}</span>`; $('#title').hidden = false;
     const time = head.seconds ? `${Math.floor(head.seconds / 3600)} h ${String(Math.floor(head.seconds / 60) % 60).padStart(2, '0')} min` : '–';
-    $('#info').innerHTML = `${[size[0], size[1], bb.max[2]].map((v) => v.toFixed(1)).join(' × ')} mm · ${layers.length} layer${layers.length === 1 ? '' : 's'} · ${n.toLocaleString()} moves<br>${head.grams ? Math.round(head.grams) + ' g ' : ''}${esc(head.material || '')} · ${time}`; $('#info').hidden = false;
-    if (head.truncated) { $('#warn').textContent = `Very large file: only the first ${n.toLocaleString()} moves (up to Z ${head.truncatedAtZ?.toFixed(2)} mm) are shown.`; $('#warn').hidden = false; }
+    $('#info').innerHTML = `${[size[0], size[1], bb.max[2]].map((v) => v.toFixed(1)).join(' × ')} mm · ${t('pv.layers', { n: layers.length })} · ${t('pv.moves', { n: n.toLocaleString(I18N.locale) })}<br>${head.grams ? Math.round(head.grams) + ' g ' : ''}${esc(head.material || '')} · ${time}`; $('#info').hidden = false;
+    if (head.truncated) { $('#warn').textContent = t('pv.truncated', { n: n.toLocaleString(I18N.locale), z: head.truncatedAtZ?.toFixed(2) }); $('#warn').hidden = false; }
     $('#help').hidden = false;
     const slider = $('#layer'), label = $('#layerlabel');
     slider.min = 1; slider.max = layers.length; slider.value = layers.length; $('#layerbox').hidden = layers.length < 2;
-    const setLayer = (v) => { v = Math.max(1, Math.min(layers.length, v)); slider.value = v; clipZ = v >= layers.length ? Infinity : layers[v - 1] + 1e-3; label.textContent = `Layer ${v} / ${layers.length} · Z ${layers[v - 1].toFixed(2)} mm`; draw(); };
+    const setLayer = (v) => { v = Math.max(1, Math.min(layers.length, v)); slider.value = v; clipZ = v >= layers.length ? Infinity : layers[v - 1] + 1e-3; label.textContent = t('pv.layer', { v, total: layers.length, z: layers[v - 1].toFixed(2) }); draw(); };
     slider.oninput = () => setLayer(+slider.value);
     addEventListener('keydown', (e) => { if (e.key === 'ArrowUp' || e.key === 'ArrowRight') setLayer(+slider.value + (e.shiftKey ? 10 : 1)); else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') setLayer(+slider.value - (e.shiftKey ? 10 : 1)); else if (e.key === 'Home') setLayer(1); else if (e.key === 'End') setLayer(layers.length); else return; e.preventDefault(); });
     msg.hidden = true;
@@ -214,4 +215,4 @@
     setLayer(layers.length);
     window.__preview = { draw, get az() { return az; }, get el() { return el; }, get dist() { return dist; }, count: n };
   }
-})();
+});

@@ -68,3 +68,5 @@ tr.sel td { background: var(--bg); }
 .combo-list li.cur { font-weight: 700; }
 .combo-list li.new { color: var(--accent); font-weight: 600; }
 .combo-list li.empty { color: var(--muted); cursor: default; }
+
+.langsel { width: auto; padding: 5px 8px; border-radius: 8px; font-size: 13px; }

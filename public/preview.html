@@ -27,15 +27,16 @@
     [hidden] { display: none !important; }
   </style>
 </head>
-<body>
+<body data-title="pv.title">
   <canvas id="gl"></canvas>
-  <div id="msg">Preparing the preview…</div>
+  <div id="msg" data-i18n="pv.preparing">Preparing the preview…</div>
   <div id="title" class="panel" hidden></div>
   <div id="warn" class="panel" hidden></div>
   <div id="legend" class="panel" hidden></div>
   <div id="info" class="panel" hidden></div>
-  <div id="help" class="panel" hidden>Drag: rotate · Wheel: zoom · Right-drag or Shift-drag: move · Double-click: reset · ↑/↓: layer</div>
+  <div id="help" class="panel" hidden data-i18n="pv.help">Drag: rotate · Wheel: zoom · Right-drag or Shift-drag: move · Double-click: reset · ↑/↓: layer</div>
   <div id="layerbox" class="panel" hidden><input id="layer" type="range" min="1" max="1" value="1"><span id="layerlabel"></span></div>
+  <script src="i18n.js"></script>
   <script src="preview.js"></script>
 </body>
 </html>
