@@ -4,6 +4,8 @@ All notable changes are listed here. The version number lives in `package.json`;
 Format based on [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/) (0.x: the API may still change).
 
 ## [Unreleased]
+
+## [0.14.0] - 2026-11-03
 ### Added
 - Classes are now entries in the database. A class typed on the request form or in the person editor is created automatically if it is new; the class field is a dropdown (arrow button, filters while typing, keyboard support) that lists all existing classes and offers "New class: …" for what you type. Spelling is unified ("2ce" finds "2CE"), the list is sorted naturally (2CE before 10CE).
 - Staff can add, rename and delete classes on the People tab (rename fixes everybody in the class; a class with people cannot be deleted).
@@ -50,7 +52,8 @@ First tagged version.
 ### Known limitations
 - Not yet tested on real printers or on a real PrusaSlicer export (see README).
 
-[Unreleased]: https://github.com/kiischti/3DPMQ/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/kiischti/3DPMQ/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/kiischti/3DPMQ/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kiischti/3DPMQ/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kiischti/3DPMQ/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/kiischti/3DPMQ/compare/v0.11.0...v0.11.1

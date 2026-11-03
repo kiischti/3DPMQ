@@ -1,6 +1,6 @@
 {
   "name": "3dpmq",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Self-hosted print request validation, approval and queue for makerspaces with PrusaLink printers",
   "license": "AGPL-3.0-or-later",
   "main": "dist/server.js",
